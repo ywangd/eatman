@@ -11,65 +11,150 @@ TILE_HEIGHT             = 24
 
 BACKGROUND_COLOR        = (  0,   0,   0)
 WALL_FILL_COLOR         = (132,   0, 132)
-WALL_EDGE_BRIGHT_COLOR  = (255, 206, 255)
-WALL_EDGE_SHADOW_COLOR  = (255,   0, 255)
+WALL_BRIGHT_COLOR       = (255, 206, 255)
+WALL_SHADOW_COLOR       = (255,   0, 255)
+BEAN_FILL_COLOR         = (128,   0, 128)
 
 
-class map(object):
+class Level(object):
 
     def __init__(self):
-        self.xsize = 600
-        self.ysize = 600
+        self.bgcolor = (0, 0, 0)
+        self.beancolor = (255, 255, 255)
+        self.wallbrightcolor = (0, 0, 255)
+        self.wallshadowcolor = (0, 0, 255)
 
-    def loadLevel(self, ilevel):
+    def load(self, ilevel):
         infile = open(os.path.join(SRCDIR, 'levels', str(ilevel)+'.dat'))
-        self.leveldata = []
+        self.data = []
         for line in infile.readlines():
             line = line.strip()
             if line != '':
                 fields = line.split(' ')
-                if fields[0] == 'set':
-                    # set variables
-                    if fields[1] == 'backgroundcolor':
-                        self.backgroundcolor = tuple([int(i) for i in fields[2:]])
-                    elif fields[1] == 'walledgebrightcolor':
-                        self.walledgebrightcolor = tuple([int(i) for i in fields[2:]])
-                    elif fields[1] == 'walledgeshadowcolor':
-                        self.walledgeshadowcolor = tuple([int(i) for i in fields[2:]])
+                if fields[0] == 'set': # set variables
+                    if fields[1] == 'bgcolor':
+                        self.bgcolor = tuple([int(i) for i in fields[2:]])
+                    elif fields[1] == 'beancolor':
+                        self.beancolor = tuple([int(i) for i in fields[2:]])
+                    elif fields[1] == 'wallbrightcolor':
+                        self.wallbrightcolor = tuple([int(i) for i in fields[2:]])
+                    elif fields[1] == 'wallshadowcolor':
+                        self.wallshadowcolor = tuple([int(i) for i in fields[2:]])
                 else: 
-                    self.leveldata.append(line)
+                    self.data.append(line) # the ascii level content
 
-        self.nrows = len(self.leveldata)
-        self.ncols = len(self.leveldata[0])
-        for line in self.leveldata:
+        self.nrows = len(self.data)
+        self.ncols = len(self.data[0])
+        for line in self.data:
             assert len(line) == self.ncols
 
-        pprint.pprint(self.leveldata)
-
-        self.mapdata = []
-        # now we need to analyze the map data
+    def create_map(self):
+        '''
+        Analyze the ascii level data and create the map
+        '''
+        self.map = []
         for iy in range(self.nrows):
             mapline = []
             for ix in range(self.ncols):
-                mapline.append(self.analyzeChar(ix, iy))
-            self.mapdata.append(mapline)
+                mapline.append(self.get_tile_name(ix, iy))
+            self.map.append(mapline)
+
+    def get_tile_name(self, ix, iy):
+        '''
+        Analyze a character to determine its tile name
+        '''
+        char = self.data[iy][ix]
+        # The chars surround it
+        char_u = None if iy==0 else self.data[iy-1][ix]
+        char_d = None if iy==self.nrows-1 else self.data[iy+1][ix]
+        char_l = None if ix==0 else self.data[iy][ix-1]
+        char_r = None if ix==self.ncols-1 else self.data[iy][ix+1]
+
+        if char == '*': # walls
+
+            if char_u=='*' and char_d=='*' and char_l=='*' and char_r=='*':
+                return 'wall-x'
+
+            if char_u=='*' and char_d=='*' and char_l=='*':
+                return 'wall-t-r'
+
+            if char_u=='*' and char_d=='*' and char_r=='*':
+                return 'wall-t-l'
+
+            if char_u=='*' and char_l=='*' and char_r=='*':
+                return 'wall-t-b'
+
+            if char_d=='*' and char_l=='*' and char_r=='*':
+                return 'wall-t-t'
+
+            if char_r=='*' and char_d=='*':
+                return 'wall-corner-ul'
+
+            if char_r=='*' and char_u=='*':
+                return 'wall-corner-ll'
+
+            if char_l=='*' and char_d=='*':
+                return 'wall-corner-ur'
+
+            if char_l=='*' and char_u=='*':
+                return 'wall-corner-lr'
+
+            if char_l=='*' and char_r=='*':
+                return 'wall-straight-hori'
+
+            if char_u=='*' and char_d=='*':
+                return 'wall-straight-vert'
+
+            if char_l=='*': 
+                return 'wall-end-r'
+
+            if char_r=='*':
+                return 'wall-end-l'
+
+            if char_u=='*':
+                return 'wall-end-b'
+
+            if char_d=='*':
+                return 'wall-end-t'
+
+            return 'wall-nub'
+
+        elif char == 'e':
+            return 'eatman'
+
+        elif char == 'w':
+            return 'ghost-w'
+
+        elif char == 'x':
+            return 'ghost-x'
+
+        elif char == 'y':
+            return 'ghost-y'
+
+        elif char == 'z':
+            return 'ghost-z'
+
+        elif char == 'O':
+            return 'bean-big'
+
+        elif char ==' ':
+            return 'bean'
+
+        return None
 
 
-
-    def draw(self, wallSurfs):
+    def draw(self, DISPLAYSURF, resource):
         x = 10
         y = 10
 
         for iy in range(self.nrows):
 
-            mapline = self.mapdata[iy]
+            mapline = self.map[iy]
             for ix in range(self.ncols):
                 tilekey = mapline[ix]
 
-                if tilekey is None:
-                    pass
-                else:
-                    DISPLAYSURF.blit(wallSurfs[tilekey], [x, y, TILE_WIDTH, TILE_HEIGHT])
+                if tilekey is not None:
+                    DISPLAYSURF.blit(resource.tiles[tilekey], [x, y, TILE_WIDTH, TILE_HEIGHT])
 
                 x += 24
             x = 10
@@ -77,60 +162,16 @@ class map(object):
 
 
 
-    def analyzeChar(self, ix, iy):
-
-        char = self.leveldata[iy][ix]
-        # The chars surround it
-        char_u = None if iy==0 else self.leveldata[iy-1][ix]
-        char_d = None if iy==self.nrows-1 else self.leveldata[iy+1][ix]
-        char_l = None if ix==0 else self.leveldata[iy][ix-1]
-        char_r = None if ix==self.ncols-1 else self.leveldata[iy][ix+1]
-
-        if char == '+':
-
-            if char_r=='-' and char_d=='|':
-                return 'corner-ul'
-
-            if char_r=='-' and char_u=='|':
-                return 'corner-ll'
-
-            if char_l=='-' and char_d=='|':
-                return 'corner-ur'
-
-            if char_l=='-' and char_u=='|':
-                return 'corner-lr'
-
-
-        elif char == '-':
-            if char_l in ['-','+'] and char_r in ['-','+']:
-                return 'straight-hori'
-            elif char_l in ['-','+']:
-                return 'end-r'
-            elif char_r in ['-','+']:
-                return 'end-l'
-
-        elif char == '|':
-            if char_u in ['-','+'] and char_d in ['-','+']:
-                return 'straight-vert'
-            elif char_u in ['-','+']:
-                return 'end-b'
-            elif char_d in ['-','+']:
-                return 'end-t'
-
-        return None
-
-
-
         
 
 
-class ghost(object):
+class Ghost(object):
 
     def __init__(self):
         pass
 
 
-class eatman(object):
+class Eatman(object):
     '''
     class docs
     '''
@@ -147,71 +188,63 @@ class eatman(object):
         self.direction      = RIGHT # current direction
         self.nlifes         = 3
 
-def loadWallImages():
-    wallSurfs = {}
-    keys = ['corner-ll', 'corner-lr', 'corner-ul', 'corner-ur', 
-            'end-b', 'end-l', 'end-r', 'end-t', 
-            'nub', 
-            'straight-hori', 'straight-vert', 
-            't-b', 't-l', 't-r', 't-t', 
-            'x']
-    for key in keys:
-        wallSurfs[key] = pygame.image.load(os.path.join(SRCDIR,'tiles','wall-'+key+'.gif')).convert()
+class Resource(object):
 
-    return wallSurfs
+    def load_tiles(self):
 
-def recolorWallImages(wallSurfs, backgroundcolor=None, walledgebrightcolor=None, walledgeshadowcolor=None):
-    '''
-    Re-color the wall tiles 
-    '''
-    for key in wallSurfs:
+        self.tiles = {}
+        files = os.listdir(os.path.join(SRCDIR,'tiles'))
+        for filename in files:
+            key = filename[:-4]
+            self.tiles[key] = pygame.image.load(os.path.join(SRCDIR,'tiles',filename)).convert()
 
-        for x in range(TILE_WIDTH):
-            for y in range(TILE_HEIGHT):
 
-                if backgroundcolor is not None \
-                        and wallSurfs[key].get_at((x,y)) == WALL_FILL_COLOR:
-                    wallSurfs[key].set_at((x,y), backgroundcolor)
+    def recolor_tiles(self, level):
+        '''
+        Re-color the tiles according to the settings in level file.
+        '''
+        for key in self.tiles:
 
-                elif walledgebrightcolor is not None \
-                        and wallSurfs[key].get_at((x,y)) == WALL_EDGE_BRIGHT_COLOR:
-                    wallSurfs[key].set_at((x,y), walledgebrightcolor)
+            if key[0:4] == 'wall':
 
-                elif walledgeshadowcolor is not None \
-                        and wallSurfs[key].get_at((x,y)) == WALL_EDGE_SHADOW_COLOR:
-                    wallSurfs[key].set_at((x,y), walledgeshadowcolor)
+                for x in range(TILE_WIDTH):
+                    for y in range(TILE_HEIGHT):
+
+                        if self.tiles[key].get_at((x,y))==WALL_FILL_COLOR:
+                            self.tiles[key].set_at((x,y), level.bgcolor)
+
+                        elif self.tiles[key].get_at((x,y)) == WALL_BRIGHT_COLOR:
+                            self.tiles[key].set_at((x,y), level.wallbrightcolor)
+
+                        elif self.tiles[key].get_at((x,y)) == WALL_SHADOW_COLOR:
+                            self.tiles[key].set_at((x,y), level.wallshadowcolor)
                     
-    return wallSurfs
+            elif key[0:4] == 'bean':
 
+                for x in range(TILE_WIDTH):
+                    for y in range(TILE_HEIGHT):
+
+                        if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
+                            self.tiles[key].set_at((x,y), level.beancolor)
 
 
 def main():
-    pass
-
-
-
-if __name__ == '__main__':
 
     pygame.init()
     DISPLAYSURF = pygame.display.set_mode((900, 800))
     pygame.display.set_caption('EatMan')
 
-    map = map()
-    map.loadLevel(1)
-    wallSurfs = loadWallImages()
-    wallSurfs = recolorWallImages(wallSurfs, map.backgroundcolor, map.walledgebrightcolor, map.walledgeshadowcolor)
+    lvl = Level()
+    lvl.load(1)
+    lvl.create_map()
 
+    res = Resource()
+    res.load_tiles()
+    res.recolor_tiles(lvl)
 
     DISPLAYSURF.fill(BACKGROUND_COLOR)
-    #pygame.draw.line(DISPLAYSURF, map.walledgebrightcolor, (60, 60), (120, 60), 4)
-    #pygame.draw.line(DISPLAYSURF, map.walledgeshadowcolor, (60, 90), (120, 90), 4)
 
-    y = 10
-    for key in wallSurfs:
-        #DISPLAYSURF.blit(wallSurfs[key], [10, y, TILE_WIDTH, TILE_HEIGHT])
-        y += 30
-
-    map.draw(wallSurfs)
+    lvl.draw(DISPLAYSURF, res)
 
     while True:
         for event in pygame.event.get():
@@ -222,6 +255,10 @@ if __name__ == '__main__':
         pygame.display.update()
 
 
+
+if __name__ == '__main__':
+
+    main()
 
 
 
