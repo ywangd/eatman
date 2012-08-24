@@ -5,7 +5,7 @@ import os, sys, pygame
 from pygame.locals import *
 import pprint
 
-SRCDIR                  = os.path.dirname(sys.argv[0])
+SRCDIR                  = os.path.abspath(os.path.dirname(sys.argv[0]))
 TILE_WIDTH              = 24
 TILE_HEIGHT             = 24
 
@@ -210,8 +210,9 @@ class Resource(object):
         self.tiles = {}
         files = os.listdir(os.path.join(SRCDIR,'tiles'))
         for filename in files:
-            key = filename[:-4]
-            self.tiles[key] = pygame.image.load(os.path.join(SRCDIR,'tiles',filename)).convert()
+            if filename[-3:] == 'gif':
+                key = filename[:-4]
+                self.tiles[key] = pygame.image.load(os.path.join(SRCDIR,'tiles',filename)).convert()
 
 
     def recolor_tiles(self, level):
