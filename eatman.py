@@ -56,7 +56,10 @@ class Level(object):
         for iy in range(self.nrows):
             mapline = []
             for ix in range(self.ncols):
-                mapline.append(self.get_tile_name(ix, iy))
+                tilename = self.get_tile_name(ix, iy)
+                if tilename == 'eatman':
+                    self.eatman_xy = (ix, iy)
+                mapline.append(tilename)
             self.map.append(mapline)
 
     def get_tile_name(self, ix, iy):
@@ -153,10 +156,11 @@ class Level(object):
             for ix in range(self.ncols):
                 tilekey = mapline[ix]
 
-                if tilekey is not None:
+                if tilekey is not None and tilekey not in ['eatman']:
                     DISPLAYSURF.blit(resource.tiles[tilekey], [x, y, TILE_WIDTH, TILE_HEIGHT])
 
                 x += 24
+
             x = 10
             y += 24
 
@@ -176,7 +180,7 @@ class Eatman(object):
     class docs
     '''
 
-    def __init__(self):
+    def __init__(self, level=None):
         '''
         Constructor
         '''
@@ -185,8 +189,19 @@ class Eatman(object):
         self.x              = 0
         self.y              = 0
         self.velocity       = 0 # current speed
-        self.direction      = RIGHT # current direction
+        self.direction      = 'RIGHT' # current direction
         self.nlifes         = 3
+
+        if level is not None:
+            self.x, self.y = level.eatman_xy
+
+    def draw(self, DISPLAYSURF, resource):
+
+        x = 10 + self.x*TILE_WIDTH
+        y = 10 + self.y*TILE_HEIGHT
+
+        DISPLAYSURF.blit(resource.tiles['eatman'], [x, y, TILE_WIDTH, TILE_HEIGHT])
+
 
 class Resource(object):
 
@@ -227,6 +242,15 @@ class Resource(object):
                         if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
                             self.tiles[key].set_at((x,y), level.beancolor)
 
+def is_valid_position(level, eatman, xoffset=0, yoffset=0):
+    x = eatman.x + xoffset
+    y = eatman.y + yoffset
+
+    if level.data[y][x] not in ['*',]:
+        return True
+    else:
+        return False
+
 
 def main():
 
@@ -242,9 +266,12 @@ def main():
     res.load_tiles()
     res.recolor_tiles(lvl)
 
-    DISPLAYSURF.fill(BACKGROUND_COLOR)
+    eam = Eatman(lvl)
 
-    lvl.draw(DISPLAYSURF, res)
+    moveLeft  = False
+    moveRight = False
+    moveUp    = False
+    moveDown  = False    
 
     while True:
         for event in pygame.event.get():
@@ -252,6 +279,46 @@ def main():
                 pygame.quit()
                 sys.exit()
 
+            if event.type == KEYDOWN:
+
+                if event.key == K_UP and is_valid_position(lvl, eam, yoffset=-1):
+                    eam.y -= 1
+                    moveDown = False
+                    moveUp = True
+
+                elif event.key == K_DOWN and is_valid_position(lvl, eam, yoffset=1):
+                    eam.y += 1
+                    moveUp = False
+                    moveDown = True
+
+                elif event.key == K_LEFT and is_valid_position(lvl, eam, xoffset=-1):
+                    eam.x -= 1
+                    moveRight = False
+                    moveLeft = True
+
+                elif event.key == K_RIGHT and is_valid_position(lvl, eam, xoffset=1):
+                    eam.x += 1
+                    moveLeft = False
+                    moveRight = True
+
+            elif event.type == KEYUP:
+                if event.key == K_LEFT:
+                    moveLeft = False
+                elif event.key == K_RIGHT:
+                    moveRight = False
+                elif event.key == K_UP:
+                    moveUp = False
+                elif event.key == K_DOWN:
+                    moveDown = False
+
+                elif event.key == K_ESCAPE:
+                    # TODO: menu
+                    pass 
+
+
+        DISPLAYSURF.fill(BACKGROUND_COLOR)
+        lvl.draw(DISPLAYSURF, res)
+        eam.draw(DISPLAYSURF, res)
         pygame.display.update()
 
 
