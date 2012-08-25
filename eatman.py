@@ -25,7 +25,7 @@ LEFT                    = 'l'
 RIGHT                   = 'r'
 
 EATMAN_IDLE             = 0
-EATMAN_ANIMATION        = 1
+EATMAN_ANIMATE          = 1
 
 
 class Level(object):
@@ -192,7 +192,7 @@ class Eatman(object):
     class docs
     '''
 
-    def __init__(self, level=None, config=None):
+    def __init__(self, config, level):
         '''
         Constructor
         '''
@@ -206,22 +206,19 @@ class Eatman(object):
         self.idx_frame      = 0
         self.nlifes         = 3
 
-        if level is not None:
-            self.x, self.y = level.eatman_xy
+        self.x, self.y = uv_to_xy(config, level.eatman_xy)
 
-        if config is not None:
-            self.baseSpeed = config.get('Eatman','ibasespeed')
-            self.moveFreq = config.get('Eatman', 'fmovefrequency')
+        self.baseSpeed = config.get('Eatman','ibasespeed')
+        self.animFreq = config.get('Eatman', 'fanimatefrequency')
 
         self.load_sprite()
 
-        self.animFreq = self.moveFreq / self.nframes
         self.lastAnimTime = time.time()
 
 
     def load_sprite(self):
         directions = [DOWN, LEFT, RIGHT, UP] 
-        frames = [1,2,3,4,5,4,3,2]
+        frames = [1,2,3,4,5,4,3,2,1]
         self.nframes = len(frames)
 
         self.frames = {}
@@ -233,22 +230,33 @@ class Eatman(object):
 
         self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprite','eatman.gif')).convert()
 
+    def make_move(self):
+
+        if self.state == EATMAN_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
+            self.idx_frame += 1
+            if self.idx_frame >= self.nframes:
+                self.idx_frame = 0
+                self.state = EATMAN_IDLE
+            else:
+                if self.direction == DOWN:
+                    self.y += self.baseSpeed
+                elif self.direction == UP:
+                    self.y -= self.baseSpeed
+                elif self.direction == LEFT:
+                    self.x -= self.baseSpeed
+                elif self.direction == RIGHT:
+                    self.x += self.baseSpeed
+                self.lastAnimTime = time.time()
+
 
     def draw(self, DISPLAYSURF):
 
-        x = 10 + self.x*TILE_WIDTH
-        y = 10 + self.y*TILE_HEIGHT
-        rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
+        rect = [self.x, self.y, TILE_WIDTH, TILE_HEIGHT]
 
         if self.direction == STATIC:
             DISPLAYSURF.blit(self.frames[self.direction], rect)
         else:
             DISPLAYSURF.blit(self.frames[self.direction][self.idx_frame], rect)
-            if self.state != EATMAN_IDLE and time.time()-self.lastAnimTime>self.animFreq:
-                self.idx_frame += 1
-                if self.idx_frame >= 8: 
-                    self.idx_frame = 0
-                self.lastAnimTime = time.time()
 
 
 class Resource(object):
@@ -311,15 +319,39 @@ class Config(object):
         return self.pars[section][option]
 
 
+def xy_to_uv(config, (x, y)):
+    '''
+    Convert the screen pixel coordinates to the board grid coordinates
+    '''
+    return ((x-config.get('Game','ixmargin'))/TILE_WIDTH,
+            (y-config.get('Game','iymargin'))/TILE_HEIGHT)
 
-def is_valid_position(level, eatman, xoffset=0, yoffset=0):
-    x = eatman.x + xoffset
-    y = eatman.y + yoffset
+def uv_to_xy(config, (u, v)):
+    '''
+    Convert the board grid coordinates to screen pixel coordinates
+    '''
+    return (config.get('Game','ixmargin')+u*TILE_WIDTH,
+            config.get('Game','iymargin')+v*TILE_HEIGHT)
+
+
+def is_valid_position(config, level, eatman, xoffset=0, yoffset=0):
+
+    x, y = xy_to_uv(config, (eatman.x, eatman.y))
+    x += xoffset
+    y += yoffset
 
     if level.data[y][x] not in ['*',]:
         return True
     else:
         return False
+
+
+def check_hit(level, eatman):
+    x, y = xy_to_uv(config, (eatman.x, eatman.y))
+    #if level.data[y][x] == ''
+
+    pass
+
 
 
 def main():
@@ -341,7 +373,7 @@ def main():
     res.load_tiles()
     res.recolor_tiles(level)
 
-    eatman = Eatman(level, config)
+    eatman = Eatman(config, level)
 
     moveLeft  = False
     moveRight = False
@@ -358,78 +390,66 @@ def main():
 
             if event.type == KEYDOWN:
 
-                if event.key == K_UP and is_valid_position(level, eatman, yoffset=-1):
+                if event.key == K_UP:
                     moveDown = False
                     moveUp = True
-                    eatman.direction = UP
-                    if time.time()-lastMoveTime>eatman.moveFreq:
-                        eatman.state = EATMAN_ANIMATION
-                        eatman.y -= 1
-                        lastMoveTime = time.time()
 
-                elif event.key == K_DOWN and is_valid_position(level, eatman, yoffset=1):
+                elif event.key == K_DOWN:
                     moveUp = False
                     moveDown = True
-                    eatman.direction = DOWN
-                    if time.time()-lastMoveTime>eatman.moveFreq:
-                        eatman.state = EATMAN_ANIMATION
-                        eatman.y += 1
-                        lastMoveTime = time.time()
 
-                elif event.key == K_LEFT and is_valid_position(level, eatman, xoffset=-1):
+                elif event.key == K_LEFT:
                     moveRight = False
                     moveLeft = True
-                    eatman.direction = LEFT
-                    if time.time()-lastMoveTime>eatman.moveFreq:
-                        eatman.state = EATMAN_ANIMATION
-                        eatman.x -= 1
-                        lastMoveTime = time.time()
 
-                elif event.key == K_RIGHT and is_valid_position(level, eatman, xoffset=1):
+                elif event.key == K_RIGHT:
                     moveLeft = False
                     moveRight = True
-                    eatman.direction = RIGHT
-                    if time.time()-lastMoveTime>eatman.moveFreq:
-                        eatman.state = EATMAN_ANIMATION
-                        eatman.x += 1
-                        lastMoveTime = time.time()
 
             elif event.type == KEYUP:
                 if event.key == K_LEFT:
                     moveLeft = False
-                    eatman.state = EATMAN_IDLE
                 elif event.key == K_RIGHT:
                     moveRight = False
-                    eatman.state = EATMAN_IDLE
                 elif event.key == K_UP:
                     moveUp = False
-                    eatman.state = EATMAN_IDLE
                 elif event.key == K_DOWN:
                     moveDown = False
-                    eatman.state = EATMAN_IDLE
 
                 elif event.key == K_ESCAPE:
                     # TODO: menu
                     pass 
 
-        if (moveUp or moveDown or moveLeft or moveRight) and time.time()-lastMoveTime>eatman.moveFreq:
-            eatman.state = EATMAN_ANIMATION
-            if moveUp and is_valid_position(level, eatman, yoffset=-1):
-                eatman.y -= 1
-            if moveDown and is_valid_position(level, eatman, yoffset=1):
-                eatman.y += 1
-            if moveLeft and is_valid_position(level, eatman, xoffset=-1):
-                eatman.x -= 1
-            if moveRight and is_valid_position(level, eatman, xoffset=1):
-                eatman.x += 1
-            lastMoveTime = time.time()
+        # Always change the facing direction when eatman is idle.
+        # But only animate it if there is valid space to move.
+        if (moveUp or moveDown or moveLeft or moveRight) and eatman.state == EATMAN_IDLE:
+            if moveUp: 
+                eatman.direction = UP 
+                if is_valid_position(config, level, eatman, yoffset=-1):
+                    eatman.state = EATMAN_ANIMATE
+            elif moveDown: 
+                eatman.direction = DOWN
+                if is_valid_position(config, level, eatman, yoffset=1):
+                    eatman.state = EATMAN_ANIMATE
+            elif moveLeft:
+                eatman.direction = LEFT
+                if is_valid_position(config, level, eatman, xoffset=-1):
+                    eatman.state = EATMAN_ANIMATE
+            elif moveRight:
+                eatman.direction = RIGHT
+                if is_valid_position(config, level, eatman, xoffset=1):
+                    eatman.state = EATMAN_ANIMATE
+
+        eatman.make_move()
 
         DISPLAYSURF.fill(BACKGROUND_COLOR)
         level.draw(DISPLAYSURF, res)
         eatman.draw(DISPLAYSURF)
         pygame.display.update()
 
-        clock_fps.tick(FPS)
+        check_hit(level, eatman)
+
+        #clock_fps.tick(FPS)
 
 
 
