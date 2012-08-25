@@ -27,6 +27,39 @@ RIGHT                   = 'r'
 EATMAN_IDLE             = 0
 EATMAN_ANIMATE          = 1
 
+L_WALL                  = '*'
+L_EMPTY                 = ' '
+L_BEAN                  = '.'
+L_BEAN_BIG              = 'O'
+L_EATMAN                = 'e'
+L_GHOST_W               = 'w'
+L_GHOST_X               = 'x'
+L_GHOST_Y               = 'y'
+L_GHOST_Z               = 'z'
+
+
+class Config(object):
+
+    def __init__(self):
+        parser = ConfigParser.ConfigParser()
+        infile = os.path.join(SRCDIR, 'config.ini')
+        parser.read(infile)
+
+        # Populate the parameters
+        func = {'s': parser.get, 'i': parser.getint, 'f': parser.getfloat, 'b': parser.getboolean}
+        self.pars = {}
+        for section in parser.sections():
+            self.pars[section] = {}
+            for option in parser.options(section):
+                self.pars[section][option] = func[option[0]](section, option)
+
+    def get(self, section, option):
+        return self.pars[section][option]
+
+
+# Read the config.ini file
+config = Config() 
+
 
 class Level(object):
 
@@ -52,8 +85,9 @@ class Level(object):
                         self.wallbrightcolor = tuple([int(i) for i in fields[2:]])
                     elif fields[1] == 'wallshadowcolor':
                         self.wallshadowcolor = tuple([int(i) for i in fields[2:]])
-                else: 
-                    self.data.append(line) # the ascii level content
+                else: # the ascii level content
+                    # All the space are replaced by dot that represents a bean
+                    self.data.append(list(line.replace(L_EMPTY, L_BEAN)))
 
         self.nrows = len(self.data)
         self.ncols = len(self.data[0])
@@ -69,8 +103,6 @@ class Level(object):
             mapline = []
             for ix in range(self.ncols):
                 tilename = self.get_tile_name(ix, iy)
-                if tilename == 'eatman':
-                    self.eatman_xy = (ix, iy)
                 mapline.append(tilename)
             self.map.append(mapline)
 
@@ -85,75 +117,79 @@ class Level(object):
         char_l = None if ix==0 else self.data[iy][ix-1]
         char_r = None if ix==self.ncols-1 else self.data[iy][ix+1]
 
-        if char == '*': # walls
+        if char == L_WALL: # walls
 
-            if char_u=='*' and char_d=='*' and char_l=='*' and char_r=='*':
+            if char_u==L_WALL and char_d==L_WALL and char_l==L_WALL and char_r==L_WALL:
                 return 'wall-x'
 
-            if char_u=='*' and char_d=='*' and char_l=='*':
+            if char_u==L_WALL and char_d==L_WALL and char_l==L_WALL:
                 return 'wall-t-r'
 
-            if char_u=='*' and char_d=='*' and char_r=='*':
+            if char_u==L_WALL and char_d==L_WALL and char_r==L_WALL:
                 return 'wall-t-l'
 
-            if char_u=='*' and char_l=='*' and char_r=='*':
+            if char_u==L_WALL and char_l==L_WALL and char_r==L_WALL:
                 return 'wall-t-b'
 
-            if char_d=='*' and char_l=='*' and char_r=='*':
+            if char_d==L_WALL and char_l==L_WALL and char_r==L_WALL:
                 return 'wall-t-t'
 
-            if char_r=='*' and char_d=='*':
+            if char_r==L_WALL and char_d==L_WALL:
                 return 'wall-corner-ul'
 
-            if char_r=='*' and char_u=='*':
+            if char_r==L_WALL and char_u==L_WALL:
                 return 'wall-corner-ll'
 
-            if char_l=='*' and char_d=='*':
+            if char_l==L_WALL and char_d==L_WALL:
                 return 'wall-corner-ur'
 
-            if char_l=='*' and char_u=='*':
+            if char_l==L_WALL and char_u==L_WALL:
                 return 'wall-corner-lr'
 
-            if char_l=='*' and char_r=='*':
+            if char_l==L_WALL and char_r==L_WALL:
                 return 'wall-straight-hori'
 
-            if char_u=='*' and char_d=='*':
+            if char_u==L_WALL and char_d==L_WALL:
                 return 'wall-straight-vert'
 
-            if char_l=='*': 
+            if char_l==L_WALL: 
                 return 'wall-end-r'
 
-            if char_r=='*':
+            if char_r==L_WALL:
                 return 'wall-end-l'
 
-            if char_u=='*':
+            if char_u==L_WALL:
                 return 'wall-end-b'
 
-            if char_d=='*':
+            if char_d==L_WALL:
                 return 'wall-end-t'
 
             return 'wall-nub'
 
-        elif char == 'e':
+        elif char == L_EATMAN:
+            self.eatman_xy = (ix, iy)
             return 'eatman'
 
-        elif char == 'w':
+        elif char == L_GHOST_W:
             return 'ghost-w'
 
-        elif char == 'x':
+        elif char == L_GHOST_X:
             return 'ghost-x'
 
-        elif char == 'y':
+        elif char == L_GHOST_Y:
             return 'ghost-y'
 
-        elif char == 'z':
+        elif char == L_GHOST_Z:
             return 'ghost-z'
 
-        elif char == 'O':
+        elif char == L_BEAN_BIG:
             return 'bean-big'
 
-        elif char ==' ':
+        elif char == L_BEAN:
             return 'bean'
+
+        elif char == L_EMPTY:
+            return None
 
         return None
 
@@ -192,7 +228,7 @@ class Eatman(object):
     class docs
     '''
 
-    def __init__(self, config, level):
+    def __init__(self, level):
         '''
         Constructor
         '''
@@ -206,7 +242,7 @@ class Eatman(object):
         self.idx_frame      = 0
         self.nlifes         = 3
 
-        self.x, self.y = uv_to_xy(config, level.eatman_xy)
+        self.x, self.y = uv_to_xy(level.eatman_xy)
 
         self.baseSpeed = config.get('Eatman','ibasespeed')
         self.animFreq = config.get('Eatman', 'fanimatefrequency')
@@ -300,33 +336,22 @@ class Resource(object):
                             self.tiles[key].set_at((x,y), level.beancolor)
 
 
-class Config(object):
-
-    def __init__(self):
-        parser = ConfigParser.ConfigParser()
-        infile = os.path.join(SRCDIR, 'config.ini')
-        parser.read(infile)
-
-        # Populate the parameters
-        func = {'s': parser.get, 'i': parser.getint, 'f': parser.getfloat, 'b': parser.getboolean}
-        self.pars = {}
-        for section in parser.sections():
-            self.pars[section] = {}
-            for option in parser.options(section):
-                self.pars[section][option] = func[option[0]](section, option)
-
-    def get(self, section, option):
-        return self.pars[section][option]
+    def load_sounds(self):
+        self.sounds = {}
+        self.sounds['bean'] = [pygame.mixer.Sound(os.path.join(SRCDIR,'sounds','bean-1.wav')), 
+                pygame.mixer.Sound(os.path.join(SRCDIR,'sounds','bean-2.wav'))]
+        self.idxBeanSound = 0
 
 
-def xy_to_uv(config, (x, y)):
+def xy_to_uv((x, y)):
     '''
-    Convert the screen pixel coordinates to the board grid coordinates
+    Convert the screen pixel coordinates to the board grid coordinates.
+    The results are rounded to the nearest integers.
     '''
-    return ((x-config.get('Game','ixmargin'))/TILE_WIDTH,
-            (y-config.get('Game','iymargin'))/TILE_HEIGHT)
+    return (int(round((x-config.get('Game','ixmargin'))*1.0/TILE_WIDTH)),
+            int(round((y-config.get('Game','iymargin'))*1.0/TILE_HEIGHT)))
 
-def uv_to_xy(config, (u, v)):
+def uv_to_xy((u, v)):
     '''
     Convert the board grid coordinates to screen pixel coordinates
     '''
@@ -334,24 +359,27 @@ def uv_to_xy(config, (u, v)):
             config.get('Game','iymargin')+v*TILE_HEIGHT)
 
 
-def is_valid_position(config, level, eatman, xoffset=0, yoffset=0):
+def is_valid_position(level, eatman, xoffset=0, yoffset=0):
 
-    x, y = xy_to_uv(config, (eatman.x, eatman.y))
+    x, y = xy_to_uv((eatman.x, eatman.y))
     x += xoffset
     y += yoffset
 
-    if level.data[y][x] not in ['*',]:
+    if level.data[y][x] not in [L_WALL,]:
         return True
     else:
         return False
 
 
-def check_hit(level, eatman):
-    x, y = xy_to_uv(config, (eatman.x, eatman.y))
-    #if level.data[y][x] == ''
-
-    pass
-
+def check_hit(level, eatman, resource):
+    x, y = xy_to_uv((eatman.x, eatman.y))
+    if level.data[y][x] == L_BEAN:
+        level.data[y][x] = L_EMPTY
+        level.map[y][x] = level.get_tile_name(x, y)
+        resource.sounds['bean'][resource.idxBeanSound].play()
+        resource.idxBeanSound += 1
+        if resource.idxBeanSound >=2:
+            resource.idxBeanSound = 0
 
 
 def main():
@@ -363,7 +391,6 @@ def main():
 
     clock_fps = pygame.time.Clock()
 
-    config = Config() # The config.ini file
 
     level = Level()
     level.load(1)
@@ -372,8 +399,9 @@ def main():
     res = Resource()
     res.load_tiles()
     res.recolor_tiles(level)
+    res.load_sounds()
 
-    eatman = Eatman(config, level)
+    eatman = Eatman(level)
 
     moveLeft  = False
     moveRight = False
@@ -425,19 +453,19 @@ def main():
         if (moveUp or moveDown or moveLeft or moveRight) and eatman.state == EATMAN_IDLE:
             if moveUp: 
                 eatman.direction = UP 
-                if is_valid_position(config, level, eatman, yoffset=-1):
+                if is_valid_position(level, eatman, yoffset=-1):
                     eatman.state = EATMAN_ANIMATE
             elif moveDown: 
                 eatman.direction = DOWN
-                if is_valid_position(config, level, eatman, yoffset=1):
+                if is_valid_position(level, eatman, yoffset=1):
                     eatman.state = EATMAN_ANIMATE
             elif moveLeft:
                 eatman.direction = LEFT
-                if is_valid_position(config, level, eatman, xoffset=-1):
+                if is_valid_position(level, eatman, xoffset=-1):
                     eatman.state = EATMAN_ANIMATE
             elif moveRight:
                 eatman.direction = RIGHT
-                if is_valid_position(config, level, eatman, xoffset=1):
+                if is_valid_position(level, eatman, xoffset=1):
                     eatman.state = EATMAN_ANIMATE
 
         eatman.make_move()
@@ -447,7 +475,7 @@ def main():
         eatman.draw(DISPLAYSURF)
         pygame.display.update()
 
-        check_hit(level, eatman)
+        check_hit(level, eatman, res)
 
         #clock_fps.tick(FPS)
 
