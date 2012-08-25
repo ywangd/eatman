@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 
-import os, sys, pygame
+import os, sys, time, random, pygame
+import ConfigParser
 from pygame.locals import *
 import pprint
+
+FPS                     = 60
 
 SRCDIR                  = os.path.abspath(os.path.dirname(sys.argv[0]))
 TILE_WIDTH              = 24
@@ -14,6 +17,15 @@ WALL_FILL_COLOR         = (132,   0, 132)
 WALL_BRIGHT_COLOR       = (255, 206, 255)
 WALL_SHADOW_COLOR       = (255,   0, 255)
 BEAN_FILL_COLOR         = (128,   0, 128)
+
+STATIC                  = 's'
+UP                      = 'u'
+DOWN                    = 'd'
+LEFT                    = 'l'
+RIGHT                   = 'r'
+
+EATMAN_IDLE             = 0
+EATMAN_ANIMATION        = 1
 
 
 class Level(object):
@@ -180,27 +192,63 @@ class Eatman(object):
     class docs
     '''
 
-    def __init__(self, level=None):
+    def __init__(self, level=None, config=None):
         '''
         Constructor
         '''
-        self.SPEED          = 3 # speed constant
+        self.baseSpeed      = 3 # speed constant
 
+        self.state          = EATMAN_IDLE
         self.x              = 0
         self.y              = 0
         self.velocity       = 0 # current speed
-        self.direction      = 'RIGHT' # current direction
+        self.direction      = STATIC
+        self.idx_frame      = 0
         self.nlifes         = 3
 
         if level is not None:
             self.x, self.y = level.eatman_xy
 
-    def draw(self, DISPLAYSURF, resource):
+        if config is not None:
+            self.baseSpeed = config.get('Eatman','ibasespeed')
+            self.moveFreq = config.get('Eatman', 'fmovefrequency')
+
+        self.load_sprite()
+
+        self.animFreq = self.moveFreq / self.nframes
+        self.lastAnimTime = time.time()
+
+
+    def load_sprite(self):
+        directions = [DOWN, LEFT, RIGHT, UP] 
+        frames = [1,2,3,4,5,4,3,2]
+        self.nframes = len(frames)
+
+        self.frames = {}
+        for direc in directions:
+            self.frames[direc] = []
+            for idx_frame in range(self.nframes):
+                filename = os.path.join(SRCDIR,'sprite','eatman-'+direc+'-'+str(frames[idx_frame])+'.gif')
+                self.frames[direc].append(pygame.image.load(filename).convert())
+
+        self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprite','eatman.gif')).convert()
+
+
+    def draw(self, DISPLAYSURF):
 
         x = 10 + self.x*TILE_WIDTH
         y = 10 + self.y*TILE_HEIGHT
+        rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
 
-        DISPLAYSURF.blit(resource.tiles['eatman'], [x, y, TILE_WIDTH, TILE_HEIGHT])
+        if self.direction == STATIC:
+            DISPLAYSURF.blit(self.frames[self.direction], rect)
+        else:
+            DISPLAYSURF.blit(self.frames[self.direction][self.idx_frame], rect)
+            if self.state != EATMAN_IDLE and time.time()-self.lastAnimTime>self.animFreq:
+                self.idx_frame += 1
+                if self.idx_frame >= 8: 
+                    self.idx_frame = 0
+                self.lastAnimTime = time.time()
 
 
 class Resource(object):
@@ -243,6 +291,27 @@ class Resource(object):
                         if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
                             self.tiles[key].set_at((x,y), level.beancolor)
 
+
+class Config(object):
+
+    def __init__(self):
+        parser = ConfigParser.ConfigParser()
+        infile = os.path.join(SRCDIR, 'config.ini')
+        parser.read(infile)
+
+        # Populate the parameters
+        func = {'s': parser.get, 'i': parser.getint, 'f': parser.getfloat, 'b': parser.getboolean}
+        self.pars = {}
+        for section in parser.sections():
+            self.pars[section] = {}
+            for option in parser.options(section):
+                self.pars[section][option] = func[option[0]](section, option)
+
+    def get(self, section, option):
+        return self.pars[section][option]
+
+
+
 def is_valid_position(level, eatman, xoffset=0, yoffset=0):
     x = eatman.x + xoffset
     y = eatman.y + yoffset
@@ -256,23 +325,30 @@ def is_valid_position(level, eatman, xoffset=0, yoffset=0):
 def main():
 
     pygame.init()
+
     DISPLAYSURF = pygame.display.set_mode((900, 800))
     pygame.display.set_caption('EatMan')
 
-    lvl = Level()
-    lvl.load(1)
-    lvl.create_map()
+    clock_fps = pygame.time.Clock()
+
+    config = Config() # The config.ini file
+
+    level = Level()
+    level.load(1)
+    level.create_map()
 
     res = Resource()
     res.load_tiles()
-    res.recolor_tiles(lvl)
+    res.recolor_tiles(level)
 
-    eam = Eatman(lvl)
+    eatman = Eatman(level, config)
 
     moveLeft  = False
     moveRight = False
     moveUp    = False
     moveDown  = False    
+
+    lastMoveTime = time.time()
 
     while True:
         for event in pygame.event.get():
@@ -282,45 +358,78 @@ def main():
 
             if event.type == KEYDOWN:
 
-                if event.key == K_UP and is_valid_position(lvl, eam, yoffset=-1):
-                    eam.y -= 1
+                if event.key == K_UP and is_valid_position(level, eatman, yoffset=-1):
                     moveDown = False
                     moveUp = True
+                    eatman.direction = UP
+                    if time.time()-lastMoveTime>eatman.moveFreq:
+                        eatman.state = EATMAN_ANIMATION
+                        eatman.y -= 1
+                        lastMoveTime = time.time()
 
-                elif event.key == K_DOWN and is_valid_position(lvl, eam, yoffset=1):
-                    eam.y += 1
+                elif event.key == K_DOWN and is_valid_position(level, eatman, yoffset=1):
                     moveUp = False
                     moveDown = True
+                    eatman.direction = DOWN
+                    if time.time()-lastMoveTime>eatman.moveFreq:
+                        eatman.state = EATMAN_ANIMATION
+                        eatman.y += 1
+                        lastMoveTime = time.time()
 
-                elif event.key == K_LEFT and is_valid_position(lvl, eam, xoffset=-1):
-                    eam.x -= 1
+                elif event.key == K_LEFT and is_valid_position(level, eatman, xoffset=-1):
                     moveRight = False
                     moveLeft = True
+                    eatman.direction = LEFT
+                    if time.time()-lastMoveTime>eatman.moveFreq:
+                        eatman.state = EATMAN_ANIMATION
+                        eatman.x -= 1
+                        lastMoveTime = time.time()
 
-                elif event.key == K_RIGHT and is_valid_position(lvl, eam, xoffset=1):
-                    eam.x += 1
+                elif event.key == K_RIGHT and is_valid_position(level, eatman, xoffset=1):
                     moveLeft = False
                     moveRight = True
+                    eatman.direction = RIGHT
+                    if time.time()-lastMoveTime>eatman.moveFreq:
+                        eatman.state = EATMAN_ANIMATION
+                        eatman.x += 1
+                        lastMoveTime = time.time()
 
             elif event.type == KEYUP:
                 if event.key == K_LEFT:
                     moveLeft = False
+                    eatman.state = EATMAN_IDLE
                 elif event.key == K_RIGHT:
                     moveRight = False
+                    eatman.state = EATMAN_IDLE
                 elif event.key == K_UP:
                     moveUp = False
+                    eatman.state = EATMAN_IDLE
                 elif event.key == K_DOWN:
                     moveDown = False
+                    eatman.state = EATMAN_IDLE
 
                 elif event.key == K_ESCAPE:
                     # TODO: menu
                     pass 
 
+        if (moveUp or moveDown or moveLeft or moveRight) and time.time()-lastMoveTime>eatman.moveFreq:
+            eatman.state = EATMAN_ANIMATION
+            if moveUp and is_valid_position(level, eatman, yoffset=-1):
+                eatman.y -= 1
+            if moveDown and is_valid_position(level, eatman, yoffset=1):
+                eatman.y += 1
+            if moveLeft and is_valid_position(level, eatman, xoffset=-1):
+                eatman.x -= 1
+            if moveRight and is_valid_position(level, eatman, xoffset=1):
+                eatman.x += 1
+            lastMoveTime = time.time()
 
         DISPLAYSURF.fill(BACKGROUND_COLOR)
-        lvl.draw(DISPLAYSURF, res)
-        eam.draw(DISPLAYSURF, res)
+        level.draw(DISPLAYSURF, res)
+        eatman.draw(DISPLAYSURF)
         pygame.display.update()
+
+        clock_fps.tick(FPS)
 
 
 
