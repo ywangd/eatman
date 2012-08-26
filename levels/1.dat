@@ -2,6 +2,10 @@ set backgroundcolor 0 0 0
 set wallbrightcolor 0 0 255
 set wallshadowcolor 0 0 255
 set beancolor 102 54 47
+ghost 0 color=RED
+ghost 1 color=PINK
+ghost 2 color=CYAN
+ghost 3 color=ORANGE
 
 **********************************
 *O                              O*
@@ -15,9 +19,9 @@ set beancolor 102 54 47
 *                 **             *
 *                                *
 *                                *
-*             z                  *
+*             3                  *
 *           ** **                *
-*           *wxy*                *
+*           *012*                *
 *           *****                *
 *                 *              *
 *        ***********             *

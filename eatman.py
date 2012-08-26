@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
 
-import os, sys, time, random, pygame
+import os, sys, time, random, copy
 import ConfigParser
+import pygame
 from pygame.locals import *
 import pprint
 
@@ -27,18 +28,41 @@ RIGHT                   = 'r'
 EATMAN_IDLE             = 0
 EATMAN_ANIMATE          = 1
 
+GHOST_IDLE              = 0
+GHOST_ANIMATE           = 1
+
 L_WALL                  = '*'
 L_EMPTY                 = ' '
 L_BEAN                  = '.'
 L_BEAN_BIG              = 'O'
 L_EATMAN                = 'e'
-L_GHOST_W               = 'w'
-L_GHOST_X               = 'x'
-L_GHOST_Y               = 'y'
-L_GHOST_Z               = 'z'
+L_GHOST_0               = '0'
+L_GHOST_1               = '1'
+L_GHOST_2               = '2'
+L_GHOST_3               = '3'
+L_GHOST_4               = '4'
+L_GHOST_5               = '5'
+L_GHOST_6               = '6'
+L_GHOST_7               = '7'
+L_GHOST_8               = '8'
+L_GHOST_9               = '9'
 
+#                           R    G    B
+RED                     = (255,   0,   0, 255)
+PINK                    = (255, 128, 255, 255)
+CYAN                    = (128, 255, 255, 255)
+ORANGE                  = (255, 128,   0, 255)
+GRASS                   = ( 20, 175,  20, 255)
+PURPLE                  = (128,   0, 255, 255)
+BLUE                    = (50,   50, 255, 255)
+WHITE                   = (248, 248, 248, 255)
+BLACK                   = (  0,   0,   0, 255)
+GRAY                    = (185, 185, 185, 255)
 
 class Config(object):
+    '''
+    The class to store informations about the game configurations.
+    '''
 
     def __init__(self):
         parser = ConfigParser.ConfigParser()
@@ -57,9 +81,72 @@ class Config(object):
         return self.pars[section][option]
 
 
-# Read the config.ini file
-config = Config() 
+class Resource(object):
+    '''
+    The class to store common game resources, including tiles, sounds, texts etc.
+    '''
 
+    def __init__(self):
+        pass
+
+    def load_tiles(self, level=None):
+        self.tiles = {}
+        files = os.listdir(os.path.join(SRCDIR,'tiles'))
+        for filename in files:
+            if filename[-3:] == 'gif':
+                key = filename[:-4]
+                self.tiles[key] = pygame.image.load(os.path.join(SRCDIR,'tiles',filename)).convert()
+
+        if level is not None:
+            self.recolor_tiles(level)
+
+
+    def load_sounds(self):
+        self.sounds = {}
+        files = os.listdir(os.path.join(SRCDIR,'sounds'))
+        for filename in files:
+            if filename[-3:] == 'wav':
+                key = filename[:-4]
+                self.sounds[key] = pygame.mixer.Sound(os.path.join(SRCDIR,'sounds',filename))
+
+
+    def recolor_tiles(self, level):
+        '''
+        Re-color the tiles according to the settings in level file.
+        '''
+        for key in self.tiles:
+
+            if key[0:4] == 'wall':
+
+                for x in range(TILE_WIDTH):
+                    for y in range(TILE_HEIGHT):
+
+                        if self.tiles[key].get_at((x,y))==WALL_FILL_COLOR:
+                            self.tiles[key].set_at((x,y), level.bgcolor)
+
+                        elif self.tiles[key].get_at((x,y)) == WALL_BRIGHT_COLOR:
+                            self.tiles[key].set_at((x,y), level.wallbrightcolor)
+
+                        elif self.tiles[key].get_at((x,y)) == WALL_SHADOW_COLOR:
+                            self.tiles[key].set_at((x,y), level.wallshadowcolor)
+                    
+            elif key[0:4] == 'bean':
+
+                for x in range(TILE_WIDTH):
+                    for y in range(TILE_HEIGHT):
+
+                        if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
+                            self.tiles[key].set_at((x,y), level.beancolor)
+
+
+
+#################################################################################
+# The global variables
+
+config = Config() # Read the config.ini file
+resource = Resource()
+
+#################################################################################
 
 class Level(object):
 
@@ -69,6 +156,14 @@ class Level(object):
         self.wallbrightcolor = (0, 0, 255)
         self.wallshadowcolor = (0, 0, 255)
 
+        self.nbeans = 0
+        self.idx_beansound = 0
+
+        self.eatman_params = {}
+
+        self.nghosts = 0
+        self.ghost_params = {}
+
     def load(self, ilevel):
         infile = open(os.path.join(SRCDIR, 'levels', str(ilevel)+'.dat'))
         self.data = []
@@ -76,6 +171,7 @@ class Level(object):
             line = line.strip()
             if line != '':
                 fields = line.split(' ')
+
                 if fields[0] == 'set': # set variables
                     if fields[1] == 'bgcolor':
                         self.bgcolor = tuple([int(i) for i in fields[2:]])
@@ -85,6 +181,15 @@ class Level(object):
                         self.wallbrightcolor = tuple([int(i) for i in fields[2:]])
                     elif fields[1] == 'wallshadowcolor':
                         self.wallshadowcolor = tuple([int(i) for i in fields[2:]])
+
+                elif fields[0] == 'ghost': # ghost parameters
+                    idx = int(fields[1])
+                    self.ghost_params[idx] = {}
+                    for pair in fields[2:]:
+                        attr, val = pair.split('=')
+                        if attr == 'color':
+                            self.ghost_params[idx][attr] = globals()[val]
+
                 else: # the ascii level content
                     # All the space are replaced by dot that represents a bean
                     self.data.append(list(line.replace(L_EMPTY, L_BEAN)))
@@ -117,7 +222,10 @@ class Level(object):
         char_l = None if ix==0 else self.data[iy][ix-1]
         char_r = None if ix==self.ncols-1 else self.data[iy][ix+1]
 
-        if char == L_WALL: # walls
+        if char == L_EMPTY:
+            return None
+
+        elif char == L_WALL: # walls
 
             if char_u==L_WALL and char_d==L_WALL and char_l==L_WALL and char_r==L_WALL:
                 return 'wall-x'
@@ -167,34 +275,27 @@ class Level(object):
             return 'wall-nub'
 
         elif char == L_EATMAN:
-            self.eatman_xy = (ix, iy)
-            return 'eatman'
+            self.eatman_params['xy'] = (ix, iy)
+            return None
 
-        elif char == L_GHOST_W:
-            return 'ghost-w'
-
-        elif char == L_GHOST_X:
-            return 'ghost-x'
-
-        elif char == L_GHOST_Y:
-            return 'ghost-y'
-
-        elif char == L_GHOST_Z:
-            return 'ghost-z'
+        elif char in [L_GHOST_0, L_GHOST_1, L_GHOST_2, L_GHOST_3, L_GHOST_4, 
+                L_GHOST_5, L_GHOST_6, L_GHOST_7, L_GHOST_8, L_GHOST_9]:
+            self.nghosts += 1
+            self.ghost_params[int(char)]['xy'] = (ix, iy)
+            return None
 
         elif char == L_BEAN_BIG:
+            self.nbeans += 1
             return 'bean-big'
 
         elif char == L_BEAN:
+            self.nbeans += 1
             return 'bean'
-
-        elif char == L_EMPTY:
-            return None
 
         return None
 
 
-    def draw(self, DISPLAYSURF, resource):
+    def draw(self, DISPLAYSURF):
         x = 10
         y = 10
 
@@ -204,7 +305,7 @@ class Level(object):
             for ix in range(self.ncols):
                 tilekey = mapline[ix]
 
-                if tilekey is not None and tilekey not in ['eatman']:
+                if tilekey is not None:
                     DISPLAYSURF.blit(resource.tiles[tilekey], [x, y, TILE_WIDTH, TILE_HEIGHT])
 
                 x += 24
@@ -219,49 +320,104 @@ class Level(object):
 
 class Ghost(object):
 
-    def __init__(self):
+    PUPIL_LR = (8, 9)
+    PUPIL_LL = (5, 9)
+    PUPIL_UR = (8, 6)
+    PUPIL_UL = (5, 6)
+
+    def __init__(self, level, idx):
+        self.state = GHOST_IDLE
+        self.speed = 3
+        self.animFreq = config.get('Ghost','fanimatefrequency')
+        self.speed = config.get('Ghost','ispeed')
+
+        self.color = level.ghost_params[idx]['color']
+        self.x, self.y = uv_to_xy(level.ghost_params[idx]['xy'])
+
+        self.pupil_color = BLACK
+        self.pupil_pos = Ghost.PUPIL_LR
+
+        self.direction = STATIC
+
+        self.load_sprite()
+        self.idx_frame = 0
+        self.lastAnimTime = time.time()
+
+    def load_sprite(self):
+        frame_sequence = [1,2,3,4,5,4,3,2,1]
+        self.nframes = len(frame_sequence)
+
+        self.frames = []
+        for idx_frame in range(self.nframes):
+
+            filename = os.path.join(SRCDIR,'sprite','ghost-'+str(frame_sequence[idx_frame])+'.gif')
+            img = pygame.image.load(filename).convert()
+
+            # modify the color
+            for x in range(TILE_WIDTH):
+                for y in range(TILE_HEIGHT):
+                    if img.get_at((x,y)) == RED:
+                        img.set_at((x,y), self.color)
+
+            # remove the eyes, will be drawn dynamically
+            for y in range(6,12):
+                for x in [5,6,8,9]:
+                    img.set_at((x,y), WHITE)
+                    img.set_at((x+9,y), WHITE)
+
+            self.frames.append(img)
+
+
+    def draw(self, DISPLAYSURF):
+
+        img = self.frames[self.idx_frame].copy()
+
+        for y in range(self.pupil_pos[1], self.pupil_pos[1]+3):
+            for x in range(self.pupil_pos[0], self.pupil_pos[0]+2):
+                img.set_at((x,y), self.pupil_color)
+                img.set_at((x+9,y), self.pupil_color)
+                
+        rect = [self.x, self.y, TILE_WIDTH, TILE_HEIGHT]
+        DISPLAYSURF.blit(img, rect)
+
+
+    def make_move(self):
         pass
+
+
 
 
 class Eatman(object):
     '''
-    class docs
+    The Eatman class for managing the Player.
     '''
 
     def __init__(self, level):
-        '''
-        Constructor
-        '''
-        self.baseSpeed      = 3 # speed constant
 
         self.state          = EATMAN_IDLE
-        self.x              = 0
-        self.y              = 0
-        self.velocity       = 0 # current speed
         self.direction      = STATIC
-        self.idx_frame      = 0
         self.nlifes         = 3
 
-        self.x, self.y = uv_to_xy(level.eatman_xy)
+        self.x, self.y = uv_to_xy(level.eatman_params['xy'])
 
-        self.baseSpeed = config.get('Eatman','ibasespeed')
         self.animFreq = config.get('Eatman', 'fanimatefrequency')
+        self.speed = config.get('Eatman','ispeed')
 
         self.load_sprite()
-
+        self.idx_frame      = 0
         self.lastAnimTime = time.time()
 
 
     def load_sprite(self):
         directions = [DOWN, LEFT, RIGHT, UP] 
-        frames = [1,2,3,4,5,4,3,2,1]
-        self.nframes = len(frames)
+        frame_sequence = [1,2,3,4,5,4,3,2,1]
+        self.nframes = len(frame_sequence)
 
         self.frames = {}
         for direc in directions:
             self.frames[direc] = []
             for idx_frame in range(self.nframes):
-                filename = os.path.join(SRCDIR,'sprite','eatman-'+direc+'-'+str(frames[idx_frame])+'.gif')
+                filename = os.path.join(SRCDIR,'sprite','eatman-'+direc+'-'+str(frame_sequence[idx_frame])+'.gif')
                 self.frames[direc].append(pygame.image.load(filename).convert())
 
         self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprite','eatman.gif')).convert()
@@ -275,13 +431,13 @@ class Eatman(object):
                 self.state = EATMAN_IDLE
             else:
                 if self.direction == DOWN:
-                    self.y += self.baseSpeed
+                    self.y += self.speed
                 elif self.direction == UP:
-                    self.y -= self.baseSpeed
+                    self.y -= self.speed
                 elif self.direction == LEFT:
-                    self.x -= self.baseSpeed
+                    self.x -= self.speed
                 elif self.direction == RIGHT:
-                    self.x += self.baseSpeed
+                    self.x += self.speed
                 self.lastAnimTime = time.time()
 
 
@@ -294,53 +450,6 @@ class Eatman(object):
         else:
             DISPLAYSURF.blit(self.frames[self.direction][self.idx_frame], rect)
 
-
-class Resource(object):
-
-    def load_tiles(self):
-
-        self.tiles = {}
-        files = os.listdir(os.path.join(SRCDIR,'tiles'))
-        for filename in files:
-            if filename[-3:] == 'gif':
-                key = filename[:-4]
-                self.tiles[key] = pygame.image.load(os.path.join(SRCDIR,'tiles',filename)).convert()
-
-
-    def recolor_tiles(self, level):
-        '''
-        Re-color the tiles according to the settings in level file.
-        '''
-        for key in self.tiles:
-
-            if key[0:4] == 'wall':
-
-                for x in range(TILE_WIDTH):
-                    for y in range(TILE_HEIGHT):
-
-                        if self.tiles[key].get_at((x,y))==WALL_FILL_COLOR:
-                            self.tiles[key].set_at((x,y), level.bgcolor)
-
-                        elif self.tiles[key].get_at((x,y)) == WALL_BRIGHT_COLOR:
-                            self.tiles[key].set_at((x,y), level.wallbrightcolor)
-
-                        elif self.tiles[key].get_at((x,y)) == WALL_SHADOW_COLOR:
-                            self.tiles[key].set_at((x,y), level.wallshadowcolor)
-                    
-            elif key[0:4] == 'bean':
-
-                for x in range(TILE_WIDTH):
-                    for y in range(TILE_HEIGHT):
-
-                        if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
-                            self.tiles[key].set_at((x,y), level.beancolor)
-
-
-    def load_sounds(self):
-        self.sounds = {}
-        self.sounds['bean'] = [pygame.mixer.Sound(os.path.join(SRCDIR,'sounds','bean-1.wav')), 
-                pygame.mixer.Sound(os.path.join(SRCDIR,'sounds','bean-2.wav'))]
-        self.idxBeanSound = 0
 
 
 def xy_to_uv((x, y)):
@@ -371,15 +480,31 @@ def is_valid_position(level, eatman, xoffset=0, yoffset=0):
         return False
 
 
-def check_hit(level, eatman, resource):
+def check_hit(level, eatman):
     x, y = xy_to_uv((eatman.x, eatman.y))
+
+    # Check if a bean is hit
     if level.data[y][x] == L_BEAN:
         level.data[y][x] = L_EMPTY
         level.map[y][x] = level.get_tile_name(x, y)
-        resource.sounds['bean'][resource.idxBeanSound].play()
-        resource.idxBeanSound += 1
-        if resource.idxBeanSound >=2:
-            resource.idxBeanSound = 0
+        level.nbeans -= 1
+        resource.sounds['bean-'+str(level.idx_beansound)].play()
+        level.idx_beansound += 1
+        if level.idx_beansound >=2:
+            level.idx_beansound = 0
+        if level.nbeans == 0:
+            # WIN
+            pass
+
+    if level.data[y][x] == L_BEAN_BIG:
+        level.data[y][x] = L_EMPTY
+        level.map[y][x] = level.get_tile_name(x, y)
+        level.nbeans -= 1
+        resource.sounds['bean-big'].play()
+        if level.nbeans == 0:
+            # WIN
+            pass
+
 
 
 def main():
@@ -391,25 +516,24 @@ def main():
 
     clock_fps = pygame.time.Clock()
 
-
     level = Level()
     level.load(1)
     level.create_map()
 
-    res = Resource()
-    res.load_tiles()
-    res.recolor_tiles(level)
-    res.load_sounds()
+    # recolor the tiles according to the level requirement
+    resource.load_tiles(level)
+    resource.load_sounds()
 
     eatman = Eatman(level)
+
+    ghosts = []
+    for i in range(level.nghosts):
+        ghosts.append(Ghost(level, i))
 
     moveLeft  = False
     moveRight = False
     moveUp    = False
     moveDown  = False    
-
-    lastMoveTime = time.time()
-
     while True:
         for event in pygame.event.get():
             if event.type == QUIT:
@@ -445,7 +569,7 @@ def main():
                     moveDown = False
 
                 elif event.key == K_ESCAPE:
-                    # TODO: menu
+                    # TODO: game menu
                     pass 
 
         # Always change the facing direction when eatman is idle.
@@ -471,11 +595,13 @@ def main():
         eatman.make_move()
 
         DISPLAYSURF.fill(BACKGROUND_COLOR)
-        level.draw(DISPLAYSURF, res)
+        level.draw(DISPLAYSURF)
         eatman.draw(DISPLAYSURF)
+        for ghost in ghosts:
+            ghost.draw(DISPLAYSURF)
         pygame.display.update()
 
-        check_hit(level, eatman, res)
+        check_hit(level, eatman)
 
         #clock_fps.tick(FPS)
 
@@ -484,9 +610,6 @@ def main():
 if __name__ == '__main__':
 
     main()
-
-
-
 
 
 
