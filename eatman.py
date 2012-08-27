@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 import os, sys, time, random, copy
 import ConfigParser
 import pygame
@@ -19,18 +18,18 @@ WALL_BRIGHT_COLOR       = (255, 206, 255)
 WALL_SHADOW_COLOR       = (255,   0, 255)
 BEAN_FILL_COLOR         = (128,   0, 128)
 
+GAME_STATE_NORMAL       = 0
+GAME_STATE_WIN          = 1
+GAME_STATE_EATMAN_DYING  = 2
+GAME_STATE_EATMAN_DEAD  = 3
+
 STATIC                  = 's'
 UP                      = 'u'
 DOWN                    = 'd'
 LEFT                    = 'l'
 RIGHT                   = 'r'
 
-EATMAN_IDLE             = 0
-EATMAN_ANIMATE          = 1
-
-GHOST_IDLE              = 0
-GHOST_ANIMATE           = 1
-
+L_BLOCK                 = '#' # so no bean will be there
 L_WALL                  = '*'
 L_EMPTY                 = ' '
 L_BEAN                  = '.'
@@ -148,24 +147,17 @@ class Resource(object):
                         if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
                             self.tiles[key].set_at((x,y), level.beancolor)
 
-class Node():
-    
-    def __init__ (self):
-        self.g = -1 # movement cost to move from previous node to this one (usually +10)
-        self.h = -1 # estimated movement cost to move from this node to the ending node (remaining horizontal and vertical steps * 10)
-        self.f = -1 # total movement cost of this node (= g + h)
-        # parent node - used to trace path back to the starting node at the end
-        self.parent = (-1, -1)
-        # node type - 0 for empty space, 1 for wall (optionally, 2 for starting node and 3 for end)
-        self.type = -1
 
 class Pathfinder(object):
 
+    NODE_TYPE_UNINITIALED   = -1
     NODE_TYPE_NOT_VISITED   = 0
     NODE_TYPE_BLOCKED       = 1
     NODE_TYPE_START         = 2
     NODE_TYPE_END           = 3
     NODE_TYPE_CURRENT       = 4
+
+    HIGH_COST               = 1000
 
     def __init__ (self):
         # use the unfold( (row, col) ) function to convert a 2D coordinate pair
@@ -293,13 +285,21 @@ class Pathfinder(object):
         for row in range(0, self.size[0], 1):
             for col in range(0, self.size[1], 1):
 
-                self.set_node( (row, col), Node() )
+                self.set_node( (row, col), self.create_new_node() )
 
                 if level.data[row][col] == L_WALL:
                     self.set_type((row, col), Pathfinder.NODE_TYPE_BLOCKED)
                 else:
                     self.set_type((row, col), Pathfinder.NODE_TYPE_NOT_VISITED)
 
+    def create_new_node(self):
+        node = {}
+        node['g'] = -1
+        node['h'] = -1
+        node['f'] = -1
+        node['parent'] = (-1, -1)
+        node['type'] = Pathfinder.NODE_TYPE_UNINITIALED
+        return node
 
     def unfold (self, (row, col)):
         # this function converts a 2D array coordinate pair (row, col)
@@ -311,35 +311,34 @@ class Pathfinder(object):
         self.map[ self.unfold((row, col)) ] = newNode
         
     def get_type (self, (row, col)):
-        return self.map[ self.unfold((row, col)) ].type
+        return self.map[ self.unfold((row, col)) ]['type']
         
     def set_type (self, (row, col), theType):
-        self.map[ self.unfold((row, col)) ].type = theType
+        self.map[ self.unfold((row, col)) ]['type'] = theType
 
     def getF (self, (row, col)):
-        return self.map[ self.unfold((row, col)) ].f
+        return self.map[ self.unfold((row, col)) ]['f']
 
     def getG (self, (row, col)):
-        return self.map[ self.unfold((row, col)) ].g
+        return self.map[ self.unfold((row, col)) ]['g']
     
     def getH (self, (row, col)):
-        return self.map[ self.unfold((row, col)) ].h
+        return self.map[ self.unfold((row, col)) ]['h']
         
     def setG (self, (row, col), newValue ):
-        self.map[ self.unfold((row, col)) ].g = newValue
+        self.map[ self.unfold((row, col)) ]['g'] = newValue
 
     def setH (self, (row, col), newValue ):
-        self.map[ self.unfold((row, col)) ].h = newValue
+        self.map[ self.unfold((row, col)) ]['h'] = newValue
         
     def setF (self, (row, col), newValue ):
-        self.map[ self.unfold((row, col)) ].f = newValue
+        self.map[ self.unfold((row, col)) ]['f'] = newValue
         
     def calcH (self, (row, col)):
-        self.map[ self.unfold((row, col)) ].h = abs(row - self.epos[0]) + abs(col - self.epos[0])
+        self.setH( (row, col), abs(row - self.epos[0]) + abs(col - self.epos[0]) )
         
     def calcF (self, (row, col)):
-        unfoldIndex = self.unfold((row, col))
-        self.map[unfoldIndex].f = self.map[unfoldIndex].g + self.map[unfoldIndex].h
+        self.setF( (row, col), self.getG((row,col)) + self.getH((row,col)) )
     
     def add_to_openlist (self, (row, col) ):
         self.openlist.append( (row, col) )
@@ -354,7 +353,7 @@ class Pathfinder(object):
             return False
         
     def get_lowest_F_node (self):
-        lowestValue = 1000 # start arbitrarily high
+        lowestValue = Pathfinder.HIGH_COST # start arbitrarily high
         lowestPair = (-1, -1)
         
         for iOrderedPair in self.openlist:
@@ -377,10 +376,10 @@ class Pathfinder(object):
             return False
 
     def set_parent (self, (row, col), (parentRow, parentCol) ):
-        self.map[ self.unfold((row, col)) ].parent = (parentRow, parentCol)
+        self.map[ self.unfold((row, col)) ]['parent'] = (parentRow, parentCol)
 
     def get_parent (self, (row, col) ):
-        return self.map[ self.unfold((row, col)) ].parent
+        return self.map[ self.unfold((row, col)) ]['parent']
         
     def clear_temp_vars (self):
         # this resets variables needed for a search (but preserves the same map / maze)
@@ -553,27 +552,22 @@ class Level(object):
             self.nbeans += 1
             return 'bean'
 
+        elif char == L_BLOCK:
+            return None
+
         return None
 
 
     def draw(self, DISPLAYSURF):
-        x = 10
-        y = 10
-
-        for iy in range(self.nrows):
-
-            mapline = self.map[iy]
-            for ix in range(self.ncols):
-                tilekey = mapline[ix]
+        for v in range(self.nrows):
+            mapline = self.map[v]
+            for u in range(self.ncols):
+                tilekey = mapline[u]
 
                 if tilekey is not None:
-                    DISPLAYSURF.blit(resource.tiles[tilekey], [x, y, TILE_WIDTH, TILE_HEIGHT])
-
-                x += 24
-
-            x = 10
-            y += 24
-
+                    x, y = uv_to_xy((u,v))
+                    rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
+                    DISPLAYSURF.blit(resource.tiles[tilekey], rect)
 
 
 class Fire(object):
@@ -622,8 +616,11 @@ class Ghost(object):
     PUPIL_UR = (8, 6)
     PUPIL_UL = (5, 6)
 
+    GHOST_IDLE      = 0
+    GHOST_ANIMATE   = 1
+
     def __init__(self, idx, level, eatman):
-        self.state = GHOST_IDLE
+        self.state = Ghost.GHOST_IDLE
         self.speed = 3
         self.animFreq = config.get('Ghost','fanimatefrequency')
         self.speed = config.get('Ghost','ispeed')
@@ -721,15 +718,16 @@ class Ghost(object):
     def make_move(self, level, eatman, fires):
 
         # If it is in middle of an animation, keep doint it till the cycle is done.
-        if self.state == GHOST_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
+        if self.state == Ghost.GHOST_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
             self.idx_frame += 1
             if self.idx_frame >= self.nframes:
                 self.idx_frame = 0
-                self.state = GHOST_IDLE
+                self.state = Ghost.GHOST_IDLE
                 self.nsteps_move_cycle += 1
                 self.moved_from = get_opposite_direction(self.direction)
                 # drop fire
-                if self.moltenPercent>0 and len(fires)<100 and random.randint(1,100)<self.moltenPercent:
+                if self.moltenPercent>0 and len(fires)<config.get('Fire','imaxfire') \
+                        and random.randint(1,100)<self.moltenPercent:
                     fires.append(Fire(xy_to_uv((self.x, self.y))))
             else:
                 if self.direction == DOWN:
@@ -743,7 +741,7 @@ class Ghost(object):
                 self.lastAnimTime = time.time()
 
         # If it is not animating, we need to figure out where to go for the next animation cycle
-        if self.state == GHOST_IDLE:
+        if self.state == Ghost.GHOST_IDLE:
 
             if len(self.pathway) > 0: # if there is a existing pathway
                 # re-roll the strategy if it is expired
@@ -788,10 +786,10 @@ class Ghost(object):
         if len(self.pathway) > 0:
             moveto = self.pathway[0]
             self.pathway = self.pathway[1:]
-            self.state = GHOST_ANIMATE
+            self.state = Ghost.GHOST_ANIMATE
             self.direction = moveto
         else:
-            self.state = GHOST_IDLE
+            self.state = Ghost.GHOST_IDLE
             self.direction = STATIC
 
 
@@ -800,9 +798,12 @@ class Eatman(object):
     The Eatman class for managing the Player.
     '''
 
+    EATMAN_IDLE     = 0
+    EATMAN_ANIMATE  = 1
+
     def __init__(self, level):
 
-        self.state          = EATMAN_IDLE
+        self.state          = Eatman.EATMAN_IDLE
         self.direction      = STATIC
         self.nlifes         = 3
 
@@ -832,6 +833,13 @@ class Eatman(object):
 
         self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprites','eatman.gif')).convert()
 
+        # load the game over animation
+        self.frames_dead = []
+        self.frames_dead.append(pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-u-5.gif')).convert())
+        for idx in range(1,9):
+            self.frames_dead.append(
+                    pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-dead-'+str(idx)+'.gif')).convert())
+
 
     def make_move(self):
 
@@ -845,11 +853,11 @@ class Eatman(object):
                 del(self.animFreq_factors[key])
 
         # Only animate the player if it is in animate state and with proper frequency
-        if self.state == EATMAN_ANIMATE and time.time()-self.lastAnimTime>animFreq:
+        if self.state == Eatman.EATMAN_ANIMATE and time.time()-self.lastAnimTime>animFreq:
             self.idx_frame += 1
             if self.idx_frame >= self.nframes:
                 self.idx_frame = 0
-                self.state = EATMAN_IDLE
+                self.state = Eatman.EATMAN_IDLE
             else:
                 if self.direction == DOWN:
                     self.y += self.speed
@@ -870,6 +878,23 @@ class Eatman(object):
             DISPLAYSURF.blit(self.frames[self.direction], rect)
         else:
             DISPLAYSURF.blit(self.frames[self.direction][self.idx_frame], rect)
+
+    def animate_dead(self, DISPLAYSURF):
+
+        rect = [self.x, self.y, TILE_WIDTH, TILE_HEIGHT]
+
+        # Animate it
+        if time.time()-self.lastAnimTime>self.animFreq*4.0:
+            self.idx_frame += 1
+            self.lastAnimTime = time.time()
+            if self.idx_frame >= len(self.frames_dead):
+                self.idx_frame = 0
+                return GAME_STATE_EATMAN_DEAD
+
+        # drawing
+        DISPLAYSURF.blit(self.frames_dead[self.idx_frame], rect)
+
+        return GAME_STATE_EATMAN_DYING
 
 
 
@@ -913,7 +938,8 @@ def is_valid_position(level, entity, xoffset=0, yoffset=0):
         return False
 
 
-def check_hit(level, eatman):
+def check_hit(level, eatman, ghosts, fires):
+
     x, y = xy_to_uv((eatman.x, eatman.y))
 
     # Check if a bean is hit
@@ -926,6 +952,7 @@ def check_hit(level, eatman):
         if level.idx_beansound >=2:
             level.idx_beansound = 0
         if level.nbeans == 0:
+            return GAME_STATE_WIN
             # WIN
             pass
 
@@ -935,9 +962,20 @@ def check_hit(level, eatman):
         level.nbeans -= 1
         resource.sounds['bean-big'].play()
         if level.nbeans == 0:
-            # WIN
-            pass
+            return GAME_STATE_WIN
 
+    for ghost in ghosts:
+        gx, gy = xy_to_uv((ghost.x, ghost.y))
+        if x==gx and y==gy:
+            eatman.idx_frame = 0
+            return GAME_STATE_EATMAN_DYING
+
+    for fire in fires:
+        if x==fire.u and y==fire.v:
+            eatman.idx_frame = 0
+            return GAME_STATE_EATMAN_DYING
+
+    return GAME_STATE_NORMAL
 
 
 def main():
@@ -946,6 +984,7 @@ def main():
 
     DISPLAYSURF = pygame.display.set_mode((900, 800))
     pygame.display.set_caption('EatMan')
+    pygame.display.set_icon(pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-icon.png')).convert())
 
     clock_fps = pygame.time.Clock()
 
@@ -968,11 +1007,15 @@ def main():
 
     fires = []
 
+    gameState = GAME_STATE_NORMAL
+
     moveLeft  = False
     moveRight = False
     moveUp    = False
     moveDown  = False    
+
     while True:
+
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
@@ -1012,30 +1055,36 @@ def main():
 
         # Always change the facing direction when eatman is idle.
         # But only animate it if there is valid space to move.
-        if (moveUp or moveDown or moveLeft or moveRight) and eatman.state == EATMAN_IDLE:
+        if gameState==GAME_STATE_NORMAL \
+                and (moveUp or moveDown or moveLeft or moveRight) and eatman.state == Eatman.EATMAN_IDLE:
             if moveUp: 
                 eatman.direction = UP 
                 if is_valid_position(level, eatman, yoffset=-1):
-                    eatman.state = EATMAN_ANIMATE
+                    eatman.state = Eatman.EATMAN_ANIMATE
             elif moveDown: 
                 eatman.direction = DOWN
                 if is_valid_position(level, eatman, yoffset=1):
-                    eatman.state = EATMAN_ANIMATE
+                    eatman.state = Eatman.EATMAN_ANIMATE
             elif moveLeft:
                 eatman.direction = LEFT
                 if is_valid_position(level, eatman, xoffset=-1):
-                    eatman.state = EATMAN_ANIMATE
+                    eatman.state = Eatman.EATMAN_ANIMATE
             elif moveRight:
                 eatman.direction = RIGHT
                 if is_valid_position(level, eatman, xoffset=1):
-                    eatman.state = EATMAN_ANIMATE
+                    eatman.state = Eatman.EATMAN_ANIMATE
 
-        eatman.make_move()
-        for ghost in ghosts:
-            ghost.make_move(level, eatman, fires)
+        if gameState==GAME_STATE_NORMAL:
+            # Movements
+            eatman.make_move()
+            for ghost in ghosts:
+                ghost.make_move(level, eatman, fires)
+            # Check if anything is hit
+            gameState = check_hit(level, eatman, ghosts, fires)
 
+
+        # Start the drawing
         DISPLAYSURF.fill(BACKGROUND_COLOR)
-
         level.draw(DISPLAYSURF)
 
         for id in range(len(fires)-1, -1, -1):
@@ -1044,27 +1093,32 @@ def main():
             else:
                 fires[id].animate(DISPLAYSURF)
 
-        eatman.draw(DISPLAYSURF)
-
         for ghost in ghosts:
             ghost.draw(DISPLAYSURF, eatman)
 
-        
+        if gameState == GAME_STATE_EATMAN_DYING:
+            if eatman.animate_dead(DISPLAYSURF) == GAME_STATE_EATMAN_DEAD:
+                break
+        else:
+            eatman.draw(DISPLAYSURF)
 
+
+        if gameState == GAME_STATE_WIN:
+            pass
+            break
 
         pygame.display.update()
 
-        check_hit(level, eatman)
-
         #clock_fps.tick(FPS)
+
+    # Terminate
+    #pygame.quit()
+    #sys.exit(0)
 
 
 
 if __name__ == '__main__':
 
     main()
-
-
-
 
 
