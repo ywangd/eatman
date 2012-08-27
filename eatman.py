@@ -58,6 +58,7 @@ BLUE                    = (50,   50, 255, 255)
 WHITE                   = (248, 248, 248, 255)
 BLACK                   = (  0,   0,   0, 255)
 GRAY                    = (185, 185, 185, 255)
+YELLOW                  = (255, 255,   0, 255)
 
 class Config(object):
     '''
@@ -140,11 +141,37 @@ class Resource(object):
 
 
 
+class Pathfinder(object):
+
+
+    def findpath(self):
+        sys.exit(1)
+        pass
+
+    def randpath(self, level, ghost, eatman):
+        moveto = [UP, DOWN, LEFT, RIGHT]
+        if ghost.moved_from == UP or (not is_valid_position(level, ghost, yoffset=-1)):
+            moveto.remove(UP)
+        if ghost.moved_from == DOWN or (not is_valid_position(level, ghost, yoffset=1)):
+            moveto.remove(DOWN)
+        if ghost.moved_from == LEFT or (not is_valid_position(level, ghost, xoffset=-1)):
+            moveto.remove(LEFT)
+        if ghost.moved_from == RIGHT or (not is_valid_position(level, ghost, xoffset=1)):
+            moveto.remove(RIGHT)
+
+        if len(moveto) == 0:
+            return ghost.moved_from
+
+        return random.choice(moveto)
+
+
+
 #################################################################################
 # The global variables
 
 config = Config() # Read the config.ini file
 resource = Resource()
+pathfinder = Pathfinder()
 
 #################################################################################
 
@@ -189,6 +216,14 @@ class Level(object):
                         attr, val = pair.split('=')
                         if attr == 'color':
                             self.ghost_params[idx][attr] = globals()[val]
+                        elif attr == 'fast': # factor of speed boost 1-infinity
+                            self.ghost_params[idx][attr] = float(val)
+                        elif attr == 'seeker': # chance to seek (0-100)
+                            self.ghost_params[idx][attr] = int(val)
+                        elif attr == 'chilling': # factor of player speed reduction 1-infinity
+                            self.ghost_params[idx][attr] = float(val)
+                        elif attr == 'molten': # chance to leave a fire on path
+                            self.ghost_params[idx][attr] = int(val)
 
                 else: # the ascii level content
                     # All the space are replaced by dot that represents a bean
@@ -320,6 +355,11 @@ class Level(object):
 
 class Ghost(object):
 
+    # When a move strategy is in effect, e.g. seeker, how many
+    # steps (grid cells) does the ghost move before it
+    # rolls for the next move strategy
+    BASE_STEP_MOVE_CYCLE = 10    # 10 cells 
+
     PUPIL_LR = (8, 9)
     PUPIL_LL = (5, 9)
     PUPIL_UR = (8, 6)
@@ -330,27 +370,50 @@ class Ghost(object):
         self.speed = 3
         self.animFreq = config.get('Ghost','fanimatefrequency')
         self.speed = config.get('Ghost','ispeed')
+        self.pathway = ''
 
-        self.color = level.ghost_params[idx]['color']
+        self.max_step_move_cycle = Ghost.BASE_STEP_MOVE_CYCLE + random.randint(-3,3)
+        self.nsteps_move_cycle = 0
+        self.move_strategy = ''
+
         self.x, self.y = uv_to_xy(level.ghost_params[idx]['xy'])
+        self.color = level.ghost_params[idx]['color']
+
+        if level.ghost_params[idx].has_key('fast'):
+            self.animFreq /= level.ghost_params[idx]['fast']
+
+        if level.ghost_params[idx].has_key('seeker'):
+            self.seekerPercent = level.ghost_params[idx]['seeker']
+        else:
+            self.seekerPercent = 0
+
+        if level.ghost_params[idx].has_key('molten'):
+            self.moltenPercent = level.ghost_params[idx]['molten']
+        else:
+            self.moltenPercent = 0
+
 
         self.pupil_color = BLACK
         self.pupil_pos = Ghost.PUPIL_LR
 
         self.direction = STATIC
+        self.moved_from = None
 
-        self.load_sprite()
+        self.load_sprites()
         self.idx_frame = 0
         self.lastAnimTime = time.time()
 
-    def load_sprite(self):
-        frame_sequence = [1,2,3,4,5,4,3,2,1]
+        self.seekerTargetX = 0
+        self.seekerTargetY = 0
+
+    def load_sprites(self):
+        frame_sequence = [1,2,2,3,4,4,3,3,2]
         self.nframes = len(frame_sequence)
 
         self.frames = []
         for idx_frame in range(self.nframes):
 
-            filename = os.path.join(SRCDIR,'sprite','ghost-'+str(frame_sequence[idx_frame])+'.gif')
+            filename = os.path.join(SRCDIR,'sprites','ghost-'+str(frame_sequence[idx_frame])+'.gif')
             img = pygame.image.load(filename).convert()
 
             # modify the color
@@ -381,10 +444,71 @@ class Ghost(object):
         DISPLAYSURF.blit(img, rect)
 
 
-    def make_move(self):
-        pass
+    def make_move(self, level, eatman):
+
+        # If it is in middle of an animation, keep doint it till the cycle is done.
+        if self.state == GHOST_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
+            self.idx_frame += 1
+            if self.idx_frame >= self.nframes:
+                self.idx_frame = 0
+                self.state = GHOST_IDLE
+                self.nsteps_move_cycle += 1
+                self.moved_from = get_opposite_direction(self.direction)
+            else:
+                if self.direction == DOWN:
+                    self.y += self.speed
+                elif self.direction == UP:
+                    self.y -= self.speed
+                elif self.direction == LEFT:
+                    self.x -= self.speed
+                elif self.direction == RIGHT:
+                    self.x += self.speed
+                self.lastAnimTime = time.time()
+
+        # If it is not animating, we need to figure out where to go for the next animation cycle
+        if self.state == GHOST_IDLE:
+
+            if len(self.pathway) > 0: # if there is a existing pathway
+                if self.nsteps_move_cycle > self.max_step_move_cycle:
+                    # re-roll the strategy
+                    self.nsteps_move_cycle = 0
+                    if random.randint(1,100) <= self.seekerPercent:
+                        self.move_strategy = 'seeker'
+                        self.pathway = pathfinder.findpath()
+                    else:
+                        self.move_strategy = 'random'
+                        self.pathway = pathfinder.randpath(level, self, eatman)
+
+                if self.move_strategy == 'seeker':
+                    if not (self.seekerTargetX == eatman.x or self.seekerTargetY == eatman.y \
+                            or ((self.seekerTargetX-eatman.x)**2+(self.seekerTargetY-eatman.y)**2)<18):
+                        self.pathway = path.finder.findpath()
+
+            else: # if no existing pathway
+                if self.nsteps_move_cycle > self.max_step_move_cycle or self.move_strategy == '':
+                    self.nsteps_move_cycle = 0
+                    # re-roll the strategy
+                    if random.randint(1,100) <= self.seekerPercent: # seek it
+                        self.move_strategy = 'seeker'
+                        self.pathway = pathfinder.findpath()
+                    else: # random path
+                        self.move_strategy = 'random'
+                        self.pathway = pathfinder.randpath(level, self, eatman)
+                else:
+                    if self.move_strategy == 'seeker':
+                        self.pathway = pathfinder.findpath()
+                    elif self.move_strategy == 'random':
+                        self.pathway = pathfinder.randpath(level, self, eatman)
+
+            # now follow the pathway
+            self.follow_pathway()
 
 
+    def follow_pathway(self):
+        moveto = self.pathway[0]
+        self.pathway = self.pathway[1:]
+        self.state = GHOST_ANIMATE
+        self.direction = moveto
 
 
 class Eatman(object):
@@ -403,12 +527,12 @@ class Eatman(object):
         self.animFreq = config.get('Eatman', 'fanimatefrequency')
         self.speed = config.get('Eatman','ispeed')
 
-        self.load_sprite()
+        self.load_sprites()
         self.idx_frame      = 0
         self.lastAnimTime = time.time()
 
 
-    def load_sprite(self):
+    def load_sprites(self):
         directions = [DOWN, LEFT, RIGHT, UP] 
         frame_sequence = [1,2,3,4,5,4,3,2,1]
         self.nframes = len(frame_sequence)
@@ -417,10 +541,11 @@ class Eatman(object):
         for direc in directions:
             self.frames[direc] = []
             for idx_frame in range(self.nframes):
-                filename = os.path.join(SRCDIR,'sprite','eatman-'+direc+'-'+str(frame_sequence[idx_frame])+'.gif')
+                filename = os.path.join(SRCDIR,'sprites','eatman-'+direc+'-'+str(frame_sequence[idx_frame])+'.gif')
                 self.frames[direc].append(pygame.image.load(filename).convert())
 
-        self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprite','eatman.gif')).convert()
+        self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprites','eatman.gif')).convert()
+
 
     def make_move(self):
 
@@ -467,10 +592,21 @@ def uv_to_xy((u, v)):
     return (config.get('Game','ixmargin')+u*TILE_WIDTH,
             config.get('Game','iymargin')+v*TILE_HEIGHT)
 
+def get_opposite_direction(direction):
+    if direction == UP:
+        return DOWN
+    if direction == DOWN:
+        return UP
+    if direction == LEFT:
+        return RIGHT
+    if direction == RIGHT:
+        return LEFT
 
-def is_valid_position(level, eatman, xoffset=0, yoffset=0):
 
-    x, y = xy_to_uv((eatman.x, eatman.y))
+
+def is_valid_position(level, entity, xoffset=0, yoffset=0):
+
+    x, y = xy_to_uv((entity.x, entity.y))
     x += xoffset
     y += yoffset
 
@@ -593,6 +729,8 @@ def main():
                     eatman.state = EATMAN_ANIMATE
 
         eatman.make_move()
+        for ghost in ghosts:
+            ghost.make_move(level, eatman)
 
         DISPLAYSURF.fill(BACKGROUND_COLOR)
         level.draw(DISPLAYSURF)
