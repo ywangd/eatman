@@ -111,6 +111,15 @@ class Resource(object):
                 self.sounds[key] = pygame.mixer.Sound(os.path.join(SRCDIR,'sounds',filename))
 
 
+    def load_fires(self):
+        self.fires = {}
+        files = os.listdir(os.path.join(SRCDIR,'sprites'))
+        for filename in files:
+            if filename[0:4] == 'fire' and filename[-3:] == 'gif':
+                key = filename[:-4]
+                self.fires[key] = pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert()
+
+
     def recolor_tiles(self, level):
         '''
         Re-color the tiles according to the settings in level file.
@@ -139,14 +148,48 @@ class Resource(object):
                         if self.tiles[key].get_at((x,y))==BEAN_FILL_COLOR:
                             self.tiles[key].set_at((x,y), level.beancolor)
 
-
+class Node():
+    
+    def __init__ (self):
+        self.g = -1 # movement cost to move from previous node to this one (usually +10)
+        self.h = -1 # estimated movement cost to move from this node to the ending node (remaining horizontal and vertical steps * 10)
+        self.f = -1 # total movement cost of this node (= g + h)
+        # parent node - used to trace path back to the starting node at the end
+        self.parent = (-1, -1)
+        # node type - 0 for empty space, 1 for wall (optionally, 2 for starting node and 3 for end)
+        self.type = -1
 
 class Pathfinder(object):
 
+    NODE_TYPE_NOT_VISITED   = 0
+    NODE_TYPE_BLOCKED       = 1
+    NODE_TYPE_START         = 2
+    NODE_TYPE_END           = 3
+    NODE_TYPE_CURRENT       = 4
 
-    def findpath(self):
-        sys.exit(1)
-        pass
+    def __init__ (self):
+        # use the unfold( (row, col) ) function to convert a 2D coordinate pair
+        # into a 1D index to use with this array.
+        self.map = {}
+        self.size = (-1, -1) # rows by columns
+        
+        self.pathChainRev = ''
+        self.pathChain = ''
+                
+        # starting and ending nodes
+        self.spos = (-1, -1)
+        self.epos = (-1, -1)
+        
+        # current node (used by algorithm)
+        self.current = (-1, -1)
+        
+        # open and closed lists of nodes to consider (used by algorithm)
+        self.openlist = []
+        self.closelist = []
+        
+        # used in algorithm (adjacent neighbors path finder is allowed to consider)
+        self.neighborSet = [ (0, -1), (0, 1), (-1, 0), (1, 0) ]
+
 
     def randpath(self, level, ghost, eatman):
         moveto = [UP, DOWN, LEFT, RIGHT]
@@ -164,6 +207,188 @@ class Pathfinder(object):
 
         return random.choice(moveto)
 
+
+    def findpath(self, level, entity, target):
+
+        self.clear_temp_vars()
+        
+        # (row, col) tuples
+        (x, y) = xy_to_uv((entity.x, entity.y))
+        self.spos = (y, x)
+        entity.seekerTargetX, entity.seekerTargetY = xy_to_uv((target.x, target.y))
+        self.epos = entity.seekerTargetY, entity.seekerTargetX
+
+        # add start node to open list
+        self.add_to_openlist( self.spos )
+        self.setG ( self.spos, 0 )
+        self.setH ( self.spos, 0 )
+        self.setF ( self.spos, 0 )
+        
+        doContinue = True
+        
+        while (doContinue == True):
+        
+            thisLowestFNode = self.get_lowest_F_node()
+
+            if not thisLowestFNode == self.epos and not thisLowestFNode == False:
+                self.current = thisLowestFNode
+                self.remove_from_openlist( self.current )
+                self.add_to_closelist( self.current )
+                
+                for offset in self.neighborSet:
+                    thisNeighbor = (self.current[0] + offset[0], self.current[1] + offset[1])
+                    
+                    if not thisNeighbor[0] < 0 and \
+                            not thisNeighbor[1] < 0 and \
+                            not thisNeighbor[0] > self.size[0] - 1 and \
+                                    not thisNeighbor[1] > self.size[1] - 1 and \
+                                    not self.get_type( thisNeighbor ) == 1:
+                        cost = self.getG( self.current ) + 10
+                        
+                        if self.is_in_openlist( thisNeighbor ) and cost < self.getG( thisNeighbor ):
+                            self.remove_from_openlist( thisNeighbor )
+                            
+                        if not self.is_in_openlist( thisNeighbor ) and not self.is_in_closelist( thisNeighbor ):
+                            self.add_to_openlist( thisNeighbor )
+                            self.setG( thisNeighbor, cost )
+                            self.calcH( thisNeighbor )
+                            self.calcF( thisNeighbor )
+                            self.set_parent( thisNeighbor, self.current )
+            else:
+                doContinue = False
+                        
+        if thisLowestFNode == False:
+            return False
+                        
+        # reconstruct path
+        self.current = self.epos
+        while not self.current == self.spos:
+            # build a string representation of the path 
+            if self.current[1] > self.get_parent(self.current)[1]:
+                self.pathChainRev += RIGHT
+            elif self.current[1] < self.get_parent(self.current)[1]:
+                self.pathChainRev += LEFT
+            elif self.current[0] > self.get_parent(self.current)[0]:
+                self.pathChainRev += DOWN
+            elif self.current[0] < self.get_parent(self.current)[0]:
+                self.pathChainRev += UP
+            self.current = self.get_parent(self.current)
+            self.set_type( self.current, Pathfinder.NODE_TYPE_CURRENT)
+            
+        # because pathChainRev was constructed in reverse order, it needs to be reversed!
+        for i in range(len(self.pathChainRev) - 1, -1, -1):
+            self.pathChain += self.pathChainRev[i]
+        
+        # set start and ending positions for future reference
+        self.set_type( self.spos, Pathfinder.NODE_TYPE_START)
+        self.set_type( self.epos, Pathfinder.NODE_TYPE_END)
+        
+        return self.pathChain
+
+    def init_map(self, level):
+        self.map = {}
+        self.size = (level.nrows, level.ncols)
+
+        # initialize path_finder map to a 2D array of empty nodes
+        for row in range(0, self.size[0], 1):
+            for col in range(0, self.size[1], 1):
+
+                self.set_node( (row, col), Node() )
+
+                if level.data[row][col] == L_WALL:
+                    self.set_type((row, col), Pathfinder.NODE_TYPE_BLOCKED)
+                else:
+                    self.set_type((row, col), Pathfinder.NODE_TYPE_NOT_VISITED)
+
+
+    def unfold (self, (row, col)):
+        # this function converts a 2D array coordinate pair (row, col)
+        # to a 1D-array index, for the object's 1D map array.
+        return (row * self.size[1]) + col
+    
+    def set_node (self, (row, col), newNode):
+        # sets the value of a particular map cell (usually refers to a node object)
+        self.map[ self.unfold((row, col)) ] = newNode
+        
+    def get_type (self, (row, col)):
+        return self.map[ self.unfold((row, col)) ].type
+        
+    def set_type (self, (row, col), theType):
+        self.map[ self.unfold((row, col)) ].type = theType
+
+    def getF (self, (row, col)):
+        return self.map[ self.unfold((row, col)) ].f
+
+    def getG (self, (row, col)):
+        return self.map[ self.unfold((row, col)) ].g
+    
+    def getH (self, (row, col)):
+        return self.map[ self.unfold((row, col)) ].h
+        
+    def setG (self, (row, col), newValue ):
+        self.map[ self.unfold((row, col)) ].g = newValue
+
+    def setH (self, (row, col), newValue ):
+        self.map[ self.unfold((row, col)) ].h = newValue
+        
+    def setF (self, (row, col), newValue ):
+        self.map[ self.unfold((row, col)) ].f = newValue
+        
+    def calcH (self, (row, col)):
+        self.map[ self.unfold((row, col)) ].h = abs(row - self.epos[0]) + abs(col - self.epos[0])
+        
+    def calcF (self, (row, col)):
+        unfoldIndex = self.unfold((row, col))
+        self.map[unfoldIndex].f = self.map[unfoldIndex].g + self.map[unfoldIndex].h
+    
+    def add_to_openlist (self, (row, col) ):
+        self.openlist.append( (row, col) )
+        
+    def remove_from_openlist (self, (row, col) ):
+        self.openlist.remove( (row, col) )
+        
+    def is_in_openlist (self, (row, col) ):
+        if self.openlist.count( (row, col) ) > 0:
+            return True
+        else:
+            return False
+        
+    def get_lowest_F_node (self):
+        lowestValue = 1000 # start arbitrarily high
+        lowestPair = (-1, -1)
+        
+        for iOrderedPair in self.openlist:
+            if self.getF( iOrderedPair ) < lowestValue:
+                lowestValue = self.getF( iOrderedPair )
+                lowestPair = iOrderedPair
+        
+        if not lowestPair == (-1, -1):
+            return lowestPair
+        else:
+            return False
+        
+    def add_to_closelist (self, (row, col) ):
+        self.closelist.append( (row, col) )
+        
+    def is_in_closelist (self, (row, col) ):
+        if self.closelist.count( (row, col) ) > 0:
+            return True
+        else:
+            return False
+
+    def set_parent (self, (row, col), (parentRow, parentCol) ):
+        self.map[ self.unfold((row, col)) ].parent = (parentRow, parentCol)
+
+    def get_parent (self, (row, col) ):
+        return self.map[ self.unfold((row, col)) ].parent
+        
+    def clear_temp_vars (self):
+        # this resets variables needed for a search (but preserves the same map / maze)
+        self.pathChainRev = ''
+        self.pathChain = ''
+        self.current = (-1, -1)
+        self.openlist = []
+        self.closelist = []
 
 
 #################################################################################
@@ -245,6 +470,7 @@ class Level(object):
                 tilename = self.get_tile_name(ix, iy)
                 mapline.append(tilename)
             self.map.append(mapline)
+
 
     def get_tile_name(self, ix, iy):
         '''
@@ -350,6 +576,37 @@ class Level(object):
 
 
 
+class Fire(object):
+
+    def __init__(self, (u, v)):
+        self.u, self.v = u, v
+        self.stime = time.time()
+
+        self.lastAnimTime = time.time()
+        self.duration = config.get('Fire','fduration') # last for how many seconds
+        self.animFreq = config.get('Fire','fanimatefrequency')
+        self.idx_frame = 0
+        self.frame_sequence = [1,2,3,4,5,6,7,8,1]
+
+    def animate(self, DISPLAYSURF):
+        x, y = uv_to_xy((self.u, self.v))
+        rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
+        id = self.frame_sequence[self.idx_frame]
+        DISPLAYSURF.blit(resource.fires['fire-'+str(id)], rect)
+        if time.time()-self.lastAnimTime > self.animFreq:
+            self.idx_frame += 1
+            self.lastAnimTime = time.time()
+            if self.idx_frame >= len(self.frame_sequence):
+                self.idx_frame = 0
+
+    def is_expired(self):
+        if time.time()-self.stime > self.duration:
+            return True
+        else:
+            return False
+
+
+
         
 
 
@@ -365,7 +622,7 @@ class Ghost(object):
     PUPIL_UR = (8, 6)
     PUPIL_UL = (5, 6)
 
-    def __init__(self, level, idx):
+    def __init__(self, idx, level, eatman):
         self.state = GHOST_IDLE
         self.speed = 3
         self.animFreq = config.get('Ghost','fanimatefrequency')
@@ -392,6 +649,11 @@ class Ghost(object):
         else:
             self.moltenPercent = 0
 
+        # chilling rate, time started, duration
+        if level.ghost_params[idx].has_key('chilling'):
+            eatman.animFreq_factors['ghost-'+str(idx)] = (level.ghost_params[idx]['chilling'], \
+                    time.time(), -1)
+
 
         self.pupil_color = BLACK
         self.pupil_pos = Ghost.PUPIL_LR
@@ -407,7 +669,7 @@ class Ghost(object):
         self.seekerTargetY = 0
 
     def load_sprites(self):
-        frame_sequence = [1,2,2,3,4,4,3,3,2]
+        frame_sequence = [1,2,3,4,5,4,3,2,1]
         self.nframes = len(frame_sequence)
 
         self.frames = []
@@ -431,9 +693,21 @@ class Ghost(object):
             self.frames.append(img)
 
 
-    def draw(self, DISPLAYSURF):
+    def draw(self, DISPLAYSURF, eatman):
 
         img = self.frames[self.idx_frame].copy()
+
+        # set the eye ball position
+        if eatman.x > self.x and eatman.y > self.y:
+            self.pupil_pos = Ghost.PUPIL_LR
+        elif eatman.x < self.x and eatman.y > self.y:
+            self.pupil_pos = Ghost.PUPIL_LL
+        elif eatman.x > self.x and eatman.y < self.y:
+            self.pupil_pos = Ghost.PUPIL_UR
+        elif eatman.x < self.x and eatman.y < self.y:
+            self.pupil_pos = Ghost.PUPIL_UL
+        else:
+            self.pupil_pos = Ghost.PUPIL_LL
 
         for y in range(self.pupil_pos[1], self.pupil_pos[1]+3):
             for x in range(self.pupil_pos[0], self.pupil_pos[0]+2):
@@ -444,7 +718,7 @@ class Ghost(object):
         DISPLAYSURF.blit(img, rect)
 
 
-    def make_move(self, level, eatman):
+    def make_move(self, level, eatman, fires):
 
         # If it is in middle of an animation, keep doint it till the cycle is done.
         if self.state == GHOST_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
@@ -454,6 +728,9 @@ class Ghost(object):
                 self.state = GHOST_IDLE
                 self.nsteps_move_cycle += 1
                 self.moved_from = get_opposite_direction(self.direction)
+                # drop fire
+                if self.moltenPercent>0 and len(fires)<100 and random.randint(1,100)<self.moltenPercent:
+                    fires.append(Fire(xy_to_uv((self.x, self.y))))
             else:
                 if self.direction == DOWN:
                     self.y += self.speed
@@ -469,20 +746,23 @@ class Ghost(object):
         if self.state == GHOST_IDLE:
 
             if len(self.pathway) > 0: # if there is a existing pathway
+                # re-roll the strategy if it is expired
                 if self.nsteps_move_cycle > self.max_step_move_cycle:
-                    # re-roll the strategy
                     self.nsteps_move_cycle = 0
                     if random.randint(1,100) <= self.seekerPercent:
                         self.move_strategy = 'seeker'
-                        self.pathway = pathfinder.findpath()
+                        self.pathway = pathfinder.findpath(level, self, eatman)
                     else:
                         self.move_strategy = 'random'
                         self.pathway = pathfinder.randpath(level, self, eatman)
 
                 if self.move_strategy == 'seeker':
-                    if not (self.seekerTargetX == eatman.x or self.seekerTargetY == eatman.y \
-                            or ((self.seekerTargetX-eatman.x)**2+(self.seekerTargetY-eatman.y)**2)<18):
-                        self.pathway = path.finder.findpath()
+                    u, v = xy_to_uv((eatman.x, eatman.y))
+                    if self.seekerTargetX == u or self.seekerTargetY == v \
+                            or ((self.seekerTargetX-u)**2+(self.seekerTargetY-v)**2)<18:
+                        pass
+                    else:
+                        self.pathway = pathfinder.findpath(level, self, eatman)
 
             else: # if no existing pathway
                 if self.nsteps_move_cycle > self.max_step_move_cycle or self.move_strategy == '':
@@ -490,13 +770,13 @@ class Ghost(object):
                     # re-roll the strategy
                     if random.randint(1,100) <= self.seekerPercent: # seek it
                         self.move_strategy = 'seeker'
-                        self.pathway = pathfinder.findpath()
+                        self.pathway = pathfinder.findpath(level, self, eatman)
                     else: # random path
                         self.move_strategy = 'random'
                         self.pathway = pathfinder.randpath(level, self, eatman)
                 else:
                     if self.move_strategy == 'seeker':
-                        self.pathway = pathfinder.findpath()
+                        self.pathway = pathfinder.findpath(level, self, eatman)
                     elif self.move_strategy == 'random':
                         self.pathway = pathfinder.randpath(level, self, eatman)
 
@@ -505,10 +785,14 @@ class Ghost(object):
 
 
     def follow_pathway(self):
-        moveto = self.pathway[0]
-        self.pathway = self.pathway[1:]
-        self.state = GHOST_ANIMATE
-        self.direction = moveto
+        if len(self.pathway) > 0:
+            moveto = self.pathway[0]
+            self.pathway = self.pathway[1:]
+            self.state = GHOST_ANIMATE
+            self.direction = moveto
+        else:
+            self.state = GHOST_IDLE
+            self.direction = STATIC
 
 
 class Eatman(object):
@@ -526,6 +810,8 @@ class Eatman(object):
 
         self.animFreq = config.get('Eatman', 'fanimatefrequency')
         self.speed = config.get('Eatman','ispeed')
+
+        self.animFreq_factors = {}
 
         self.load_sprites()
         self.idx_frame      = 0
@@ -549,7 +835,17 @@ class Eatman(object):
 
     def make_move(self):
 
-        if self.state == EATMAN_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
+        # modify the animation frequency by any buff/debuff
+        animFreq = self.animFreq
+        for key in self.animFreq_factors:
+            vals = self.animFreq_factors[key]
+            if vals[2] < 0 or time.time()-vals[1]<vals[2]:
+                animFreq *= vals[0]
+            else:
+                del(self.animFreq_factors[key])
+
+        # Only animate the player if it is in animate state and with proper frequency
+        if self.state == EATMAN_ANIMATE and time.time()-self.lastAnimTime>animFreq:
             self.idx_frame += 1
             if self.idx_frame >= self.nframes:
                 self.idx_frame = 0
@@ -577,6 +873,7 @@ class Eatman(object):
 
 
 
+# x, y is column, row
 def xy_to_uv((x, y)):
     '''
     Convert the screen pixel coordinates to the board grid coordinates.
@@ -656,15 +953,20 @@ def main():
     level.load(1)
     level.create_map()
 
+    pathfinder.init_map(level)
+
     # recolor the tiles according to the level requirement
     resource.load_tiles(level)
     resource.load_sounds()
+    resource.load_fires()
 
     eatman = Eatman(level)
 
     ghosts = []
     for i in range(level.nghosts):
-        ghosts.append(Ghost(level, i))
+        ghosts.append(Ghost(i, level, eatman))
+
+    fires = []
 
     moveLeft  = False
     moveRight = False
@@ -730,13 +1032,26 @@ def main():
 
         eatman.make_move()
         for ghost in ghosts:
-            ghost.make_move(level, eatman)
+            ghost.make_move(level, eatman, fires)
 
         DISPLAYSURF.fill(BACKGROUND_COLOR)
+
         level.draw(DISPLAYSURF)
+
+        for id in range(len(fires)-1, -1, -1):
+            if fires[id].is_expired():
+                del(fires[id]) 
+            else:
+                fires[id].animate(DISPLAYSURF)
+
         eatman.draw(DISPLAYSURF)
+
         for ghost in ghosts:
-            ghost.draw(DISPLAYSURF)
+            ghost.draw(DISPLAYSURF, eatman)
+
+        
+
+
         pygame.display.update()
 
         check_hit(level, eatman)
