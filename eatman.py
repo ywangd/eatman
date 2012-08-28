@@ -246,16 +246,45 @@ class Level(object):
         for line in self.data:
             assert len(line) == self.ncols
 
-    def create_map(self):
+    def create_map(self, DISPLAYSURF):
         '''
         Analyze the ascii level data and create the map
         '''
+
+        self.mapSurf = DISPLAYSURF.copy()
+
         self.map = []
-        for iy in range(self.nrows):
+        for v in range(self.nrows):
             mapline = []
-            for ix in range(self.ncols):
-                tilename = self.get_tile_name(ix, iy)
-                mapline.append(tilename)
+            for u in range(self.ncols):
+                tilekey = self.get_tile_name(u, v)
+                if tilekey is not None:
+                    mapline.append(tilekey[0])
+                else:
+                    mapline.append(None)
+
+                if tilekey is not None and tilekey[0][0:4] != 'bean':
+                    x, y = uv_to_xy((u,v))
+                    rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
+                    img = resource.tiles[tilekey[0]].copy()
+                    for corner in tilekey[1]:
+                        if corner == 'ul':
+                            xstart = 0
+                            ystart = 0
+                        elif corner == 'ur':
+                            xstart = 19
+                            ystart = 0
+                        elif corner == 'll':
+                            xstart = 0
+                            ystart = 19
+                        elif corner == 'lr':
+                            xstart = 19
+                            ystart = 19
+                        for ii in range (0,5):
+                            for jj in range (0,5):
+                                img.set_at((xstart+ii,ystart+jj), BACKGROUND_COLOR)
+
+                    self.mapSurf.blit(img, rect)
             self.map.append(mapline)
 
 
@@ -270,57 +299,80 @@ class Level(object):
         char_l = None if ix==0 else self.data[iy][ix-1]
         char_r = None if ix==self.ncols-1 else self.data[iy][ix+1]
 
+        char_ul = None if ix==0 or iy==0 else self.data[iy-1][ix-1]
+        char_ur = None if ix==self.ncols-1 or iy==0 else self.data[iy-1][ix+1]
+        char_ll = None if ix==0 or iy==self.nrows-1 else self.data[iy+1][ix-1]
+        char_lr = None if ix==self.ncols-1 or iy==self.nrows-1 else self.data[iy+1][ix+1]
+
+        corner_to_erase = []
+
         if char == L_EMPTY:
             return None
 
         elif char == L_WALL: # walls
 
             if char_u==L_WALL and char_d==L_WALL and char_l==L_WALL and char_r==L_WALL:
-                return 'wall-x'
+                if char_ul == L_WALL: corner_to_erase.append('ul')
+                if char_ur == L_WALL: corner_to_erase.append('ur')
+                if char_ll == L_WALL: corner_to_erase.append('ll')
+                if char_lr == L_WALL: corner_to_erase.append('lr')
+                return 'wall-x', corner_to_erase
 
             if char_u==L_WALL and char_d==L_WALL and char_l==L_WALL:
-                return 'wall-t-r'
+                if char_ul == L_WALL: corner_to_erase.append('ul')
+                if char_ll == L_WALL: corner_to_erase.append('ll')
+                return 'wall-t-r', corner_to_erase
 
             if char_u==L_WALL and char_d==L_WALL and char_r==L_WALL:
-                return 'wall-t-l'
+                if char_ur == L_WALL: corner_to_erase.append('ur')
+                if char_lr == L_WALL: corner_to_erase.append('lr')
+                return 'wall-t-l', corner_to_erase
 
             if char_u==L_WALL and char_l==L_WALL and char_r==L_WALL:
-                return 'wall-t-b'
+                if char_ul == L_WALL: corner_to_erase.append('ul')
+                if char_ur == L_WALL: corner_to_erase.append('ur')
+                return 'wall-t-b', corner_to_erase
 
             if char_d==L_WALL and char_l==L_WALL and char_r==L_WALL:
-                return 'wall-t-t'
+                if char_ll == L_WALL: corner_to_erase.append('ll')
+                if char_lr == L_WALL: corner_to_erase.append('lr')
+                return 'wall-t-t', corner_to_erase
 
             if char_r==L_WALL and char_d==L_WALL:
-                return 'wall-corner-ul'
+                if char_lr == L_WALL: corner_to_erase.append('lr')
+                return 'wall-corner-ul', corner_to_erase
 
             if char_r==L_WALL and char_u==L_WALL:
-                return 'wall-corner-ll'
+                if char_ur == L_WALL: corner_to_erase.append('ur')
+                return 'wall-corner-ll', corner_to_erase
 
             if char_l==L_WALL and char_d==L_WALL:
-                return 'wall-corner-ur'
+                if char_ll == L_WALL: corner_to_erase.append('ll')
+                return 'wall-corner-ur', corner_to_erase
 
             if char_l==L_WALL and char_u==L_WALL:
-                return 'wall-corner-lr'
+                if char_ul == L_WALL: corner_to_erase.append('ul')
+                return 'wall-corner-lr', corner_to_erase
 
             if char_l==L_WALL and char_r==L_WALL:
-                return 'wall-straight-hori'
+                return 'wall-straight-hori', corner_to_erase
 
             if char_u==L_WALL and char_d==L_WALL:
-                return 'wall-straight-vert'
+                return 'wall-straight-vert', corner_to_erase
 
             if char_l==L_WALL: 
-                return 'wall-end-r'
+                return 'wall-end-r', corner_to_erase
 
             if char_r==L_WALL:
-                return 'wall-end-l'
+                return 'wall-end-l', corner_to_erase
 
             if char_u==L_WALL:
-                return 'wall-end-b'
+                return 'wall-end-b', corner_to_erase
 
             if char_d==L_WALL:
-                return 'wall-end-t'
+                return 'wall-end-t', corner_to_erase
 
-            return 'wall-nub'
+            return 'wall-nub', corner_to_erase
 
         elif char == L_EATMAN:
             self.eatman_params['xy'] = (ix, iy)
@@ -334,11 +386,11 @@ class Level(object):
 
         elif char == L_BEAN_BIG:
             self.nbeans += 1
-            return 'bean-big'
+            return 'bean-big', corner_to_erase
 
         elif char == L_BEAN:
             self.nbeans += 1
-            return 'bean'
+            return 'bean', corner_to_erase
 
         elif char == L_BLOCK:
             return None
@@ -347,12 +399,17 @@ class Level(object):
 
 
     def draw(self, DISPLAYSURF):
+
+        # draw the maze
+        DISPLAYSURF.blit(self.mapSurf, [0,0])
+
+        # draw the beans
         for v in range(self.nrows):
             mapline = self.map[v]
             for u in range(self.ncols):
                 tilekey = mapline[u]
 
-                if tilekey is not None:
+                if tilekey == 'bean' or tilekey == 'bean-big':
                     x, y = uv_to_xy((u,v))
                     rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
                     DISPLAYSURF.blit(resource.tiles[tilekey], rect)
@@ -536,6 +593,9 @@ class Ghost(object):
 
         if eatman.state & Eatman.INVICIBLE and not (self.state & Ghost.DYING):
             animFreq *= 3.0
+
+        if self.state & Ghost.DYING:
+            animFreq /= 4.0
 
         # If it is in middle of an animation, keep doint it till the cycle is done.
         if self.state & Ghost.ANIMATE and time.time()-self.lastAnimTime>animFreq:
@@ -792,6 +852,9 @@ def is_valid_position(level, entity, xoffset=0, yoffset=0):
     x += xoffset
     y += yoffset
 
+    if x >= level.ncols or y >=level.nrows or x <= 0 or y <= 0:
+        return False
+
     if level.data[y][x] not in [L_WALL,]:
         return True
     else:
@@ -853,7 +916,7 @@ def main():
 
     pygame.init()
 
-    DISPLAYSURF = pygame.display.set_mode((800, 700))
+    DISPLAYSURF = pygame.display.set_mode((800, 800))
     pygame.display.set_caption('EatMan')
     pygame.display.set_icon(
             pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-icon.png')).convert())
@@ -862,14 +925,15 @@ def main():
 
     level = Level()
     level.load(0)
-    level.create_map()
-
-    pf.init_map(level, L_WALL)
 
     # recolor the tiles according to the level requirement
     resource.load_tiles(level)
     resource.load_sounds()
     resource.load_sprites()
+
+    level.create_map(DISPLAYSURF)
+
+    pf.init_map(level, L_WALL)
 
     eatman = Eatman(level)
 
@@ -991,7 +1055,7 @@ def main():
 
     # Terminate
     #pygame.quit()
-    #sys.exit(0)
+    #sys.exit()
 
 
 

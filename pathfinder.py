@@ -58,7 +58,6 @@ class Pathfinder(object):
         if len(moveto) == 0:
             return ghost.moved_from
 
-        print eu, ev
         mindist = Pathfinder.HIGH_COST
         for mt in moveto:
             if mt == UP:
@@ -71,11 +70,9 @@ class Pathfinder(object):
                 dist = (su+1 - eu)**2 + (sv - ev)**2
 
             if mindist > dist:
-                print mt, dist
                 mindist = dist
                 choice = mt
 
-        print moveto, choice
         return choice
 
 
