@@ -1,4 +1,4 @@
-set backgroundcolor 0 0 0 
+set wallbgcolor 0 0 50 
 set wallbrightcolor 0 0 255
 set wallshadowcolor 0 0 255
 set beancolor 102 54 47

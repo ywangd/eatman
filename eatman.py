@@ -7,9 +7,13 @@ from pygame.locals import *
 import pprint
 import pathfinder
 
+SRCDIR                  = os.path.abspath(os.path.dirname(sys.argv[0]))
+
 FPS                     = 60
 
-SRCDIR                  = os.path.abspath(os.path.dirname(sys.argv[0]))
+WINDOW_WIDTH            = 800
+WINDOW_HEIGHT           = 752
+
 TILE_WIDTH              = 24
 TILE_HEIGHT             = 24
 
@@ -21,8 +25,8 @@ BEAN_FILL_COLOR         = (128,   0, 128)
 
 GAME_STATE_NORMAL       = 0
 GAME_STATE_WIN          = 1
-GAME_STATE_EATMAN_DYING = 2
-GAME_STATE_EATMAN_DEAD  = 3
+GAME_STATE_DYING        = 2
+GAME_STATE_DEAD         = 3
 
 STATIC                  = 's'
 UP                      = 'u'
@@ -90,17 +94,13 @@ class Resource(object):
     def __init__(self):
         pass
 
-    def load_tiles(self, level=None):
+    def load_tiles(self):
         self.tiles = {}
         files = os.listdir(os.path.join(SRCDIR,'tiles'))
         for filename in files:
             if filename[-3:] == 'gif':
                 key = filename[:-4]
                 self.tiles[key] = pygame.image.load(os.path.join(SRCDIR,'tiles',filename)).convert()
-
-        if level is not None:
-            self.recolor_tiles(level)
-
 
     def load_sounds(self):
         self.sounds = {}
@@ -159,7 +159,7 @@ class Resource(object):
                     for y in range(TILE_HEIGHT):
 
                         if self.tiles[key].get_at((x,y))==WALL_FILL_COLOR:
-                            self.tiles[key].set_at((x,y), level.bgcolor)
+                            self.tiles[key].set_at((x,y), level.wallbgcolor)
 
                         elif self.tiles[key].get_at((x,y)) == WALL_BRIGHT_COLOR:
                             self.tiles[key].set_at((x,y), level.wallbrightcolor)
@@ -183,14 +183,13 @@ class Resource(object):
 config = Config() # Read the config.ini file
 resource = Resource()
 pf = pathfinder.Pathfinder()
-gameState = GAME_STATE_NORMAL
 
 #################################################################################
 
 class Level(object):
 
     def __init__(self):
-        self.bgcolor = (0, 0, 0)
+        self.wallbgcolor = (0, 0, 0)
         self.beancolor = (255, 255, 255)
         self.wallbrightcolor = (0, 0, 255)
         self.wallshadowcolor = (0, 0, 255)
@@ -212,8 +211,8 @@ class Level(object):
                 fields = line.split(' ')
 
                 if fields[0] == 'set': # set variables
-                    if fields[1] == 'bgcolor':
-                        self.bgcolor = tuple([int(i) for i in fields[2:]])
+                    if fields[1] == 'wallbgcolor':
+                        self.wallbgcolor = tuple([int(i) for i in fields[2:]])
                     elif fields[1] == 'beancolor':
                         self.beancolor = tuple([int(i) for i in fields[2:]])
                     elif fields[1] == 'wallbrightcolor':
@@ -246,28 +245,25 @@ class Level(object):
         for line in self.data:
             assert len(line) == self.ncols
 
-    def create_map(self, DISPLAYSURF):
-        '''
-        Analyze the ascii level data and create the map
-        '''
 
-        self.mapSurf = DISPLAYSURF.copy()
+    def analyze_data(self, DISPLAYSURF):
 
-        self.map = []
+        # Create the surface to display the static objects (e.g. walls)
+        self.mazeSurf = DISPLAYSURF.copy()
+        #
+        self.dynamicObjects = {}
+
+        # Analyze the data for tile information
         for v in range(self.nrows):
-            mapline = []
             for u in range(self.ncols):
-                tilekey = self.get_tile_name(u, v)
-                if tilekey is not None:
-                    mapline.append(tilekey[0])
-                else:
-                    mapline.append(None)
 
-                if tilekey is not None and tilekey[0][0:4] != 'bean':
-                    x, y = uv_to_xy((u,v))
-                    rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
-                    img = resource.tiles[tilekey[0]].copy()
-                    for corner in tilekey[1]:
+                tileRes = self.analyze_tile(u, v) # what is this tile
+
+                # If it is a wall tile
+                if tileRes is not None and tileRes[0][0:4] != 'bean':
+                    img = resource.tiles[tileRes[0]].copy()
+                    # Erase any corner pixels for blocky walls
+                    for corner in tileRes[1]:
                         if corner == 'ul':
                             xstart = 0
                             ystart = 0
@@ -280,15 +276,21 @@ class Level(object):
                         elif corner == 'lr':
                             xstart = 19
                             ystart = 19
-                        for ii in range (0,5):
-                            for jj in range (0,5):
-                                img.set_at((xstart+ii,ystart+jj), BACKGROUND_COLOR)
+                        for ii in range(5):
+                            for jj in range(5):
+                                img.set_at((xstart+ii,ystart+jj), self.wallbgcolor)
+                    # Draw this wall tile
+                    x, y = uv_to_xy((u,v))
+                    rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
+                    self.mazeSurf.blit(img, rect)
 
-                    self.mapSurf.blit(img, rect)
-            self.map.append(mapline)
+                # If it is a bean
+                elif tileRes is not None and tileRes[0][0:4] == 'bean':
+                    img = resource.tiles[tileRes[0]]
+                    self.dynamicObjects[uv_to_key((u,v))] = Bean((u,v), img)
 
 
-    def get_tile_name(self, ix, iy):
+    def analyze_tile(self, ix, iy):
         '''
         Analyze a character to determine its tile name
         '''
@@ -298,7 +300,7 @@ class Level(object):
         char_d = None if iy==self.nrows-1 else self.data[iy+1][ix]
         char_l = None if ix==0 else self.data[iy][ix-1]
         char_r = None if ix==self.ncols-1 else self.data[iy][ix+1]
-
+        # The corner pieces
         char_ul = None if ix==0 or iy==0 else self.data[iy-1][ix-1]
         char_ur = None if ix==self.ncols-1 or iy==0 else self.data[iy-1][ix+1]
         char_ll = None if ix==0 or iy==self.nrows-1 else self.data[iy+1][ix-1]
@@ -401,18 +403,12 @@ class Level(object):
     def draw(self, DISPLAYSURF):
 
         # draw the maze
-        DISPLAYSURF.blit(self.mapSurf, [0,0])
+        DISPLAYSURF.blit(self.mazeSurf, [0,0])
 
-        # draw the beans
-        for v in range(self.nrows):
-            mapline = self.map[v]
-            for u in range(self.ncols):
-                tilekey = mapline[u]
-
-                if tilekey == 'bean' or tilekey == 'bean-big':
-                    x, y = uv_to_xy((u,v))
-                    rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
-                    DISPLAYSURF.blit(resource.tiles[tilekey], rect)
+        # draw the daynamic objects, e.g. beans
+        for key in self.dynamicObjects:
+            obj = self.dynamicObjects[key]
+            DISPLAYSURF.blit(obj.image, uv_to_xy(obj.pos))
 
 
 class Fire(object):
@@ -809,13 +805,24 @@ class Eatman(object):
             self.lastAnimTime = time.time()
             if self.idx_frame >= len(self.frames_dead):
                 self.idx_frame = 0
-                return GAME_STATE_EATMAN_DEAD
+                return GAME_STATE_DEAD
 
         # drawing
         DISPLAYSURF.blit(self.frames_dead[self.idx_frame], rect)
 
-        return GAME_STATE_EATMAN_DYING
+        return GAME_STATE_DYING
 
+class Bean(object):
+    def __init__(self, (u, v), image):
+        self.pos = (u, v)
+        self.image = image
+
+
+def uv_to_key((u, v)):
+    '''
+    Create a dictionary key using the u, v grid cell coordinates
+    '''
+    return str(u) + ',' + str(v)
 
 
 # x, y is column, row
@@ -874,17 +881,17 @@ def check_hit(level, eatman, ghosts, fires):
                 pass
             else:
                 eatman.idx_frame = 0
-                return GAME_STATE_EATMAN_DYING
+                return GAME_STATE_DYING
 
     for fire in fires:
         if x==fire.u and y==fire.v:
             eatman.idx_frame = 0
-            return GAME_STATE_EATMAN_DYING
+            return GAME_STATE_DYING
 
     # Check if a bean is hit
     if level.data[y][x] == L_BEAN:
         level.data[y][x] = L_EMPTY
-        level.map[y][x] = level.get_tile_name(x, y)
+        del level.dynamicObjects[uv_to_key((x,y))]
         level.nbeans -= 1
         resource.sounds['bean-'+str(level.idx_beansound)].play()
         level.idx_beansound += 1
@@ -896,7 +903,7 @@ def check_hit(level, eatman, ghosts, fires):
     # Big beans
     if level.data[y][x] == L_BEAN_BIG:
         level.data[y][x] = L_EMPTY
-        level.map[y][x] = level.get_tile_name(x, y)
+        del level.dynamicObjects[uv_to_key((x,y))]
         level.nbeans -= 1
         resource.sounds['bean-big'].play()
         if level.nbeans == 0:
@@ -905,42 +912,126 @@ def check_hit(level, eatman, ghosts, fires):
         eatman.set_state(Eatman.INVICIBLE)
         eatman.lastInvicibleTime = time.time()
 
-
     return gameState
 
+
+def make_text_image(text, font, color):
+    surf = font.render(text, True, color)
+    return surf, surf.get_rect()
+
+def show_text_screen(text):
+    # This function displays large text in the
+    # center of the screen until a key is pressed.
+    # Draw the text drop shadow
+    titleSurf, titleRect = make_text_image(text, BIGFONT, GRAY)
+    titleRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2))
+    DISPLAYSURF.blit(titleSurf, titleRect)
+
+    # Draw the text
+    titleSurf, titleRect = make_text_image(text, BIGFONT, WHITE)
+    titleRect.center = (int(WINDOW_WIDTH / 2) - 3, int(WINDOW_HEIGHT / 2) - 3)
+    DISPLAYSURF.blit(titleSurf, titleRect)
+
+    # Draw the additional "Press a key to play." text.
+    pressKeySurf, pressKeyRect = make_text_image('Press a key to play.', BASICFONT, WHITE)
+    pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 100)
+    DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
+
+    while check_for_key_press() == None:
+        pygame.display.update()
+
+
+def check_for_quit():
+    for event in pygame.event.get(QUIT): # get all the QUIT events
+        terminate() # terminate if any QUIT events are present
+    for event in pygame.event.get(KEYUP): # get all the KEYUP events
+        if event.key == K_ESCAPE:
+            terminate() # terminate if the KEYUP event was for the Esc key
+        pygame.event.post(event) # put the other KEYUP event objects back
+
+def check_for_key_press():
+    # Go through event queue looking for a KEYUP event.
+    # Grab KEYDOWN events to remove them from the event queue.
+    check_for_quit()
+    for event in pygame.event.get([KEYDOWN, KEYUP]):
+        if event.type == KEYDOWN:
+            continue
+        return event.key
+    return None
+
+def terminate():
+    pygame.quit()
+    sys.exit()
+
+
+def show_pause_screen():
+    pass
+
+def show_title_screen():
+    show_text_screen('EatMan')
+
+def show_lose_screen():
+    show_text_screen('Lose')
+
+def show_win_screen():
+    show_text_screen('Win')
 
 
 def main():
 
-    global gameState
+    global gameState, DISPLAYSURF, BASICFONT, BIGFONT
 
     pygame.init()
-
-    DISPLAYSURF = pygame.display.set_mode((800, 800))
+    #clock_fps = pygame.time.Clock()
+    DISPLAYSURF = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    BASICFONT = pygame.font.Font('freesansbold.ttf', 18)
+    BIGFONT = pygame.font.Font('freesansbold.ttf', 100)
     pygame.display.set_caption('EatMan')
     pygame.display.set_icon(
             pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-icon.png')).convert())
 
-    clock_fps = pygame.time.Clock()
-
-    level = Level()
-    level.load(0)
-
-    # recolor the tiles according to the level requirement
-    resource.load_tiles(level)
+    resource.load_tiles()
     resource.load_sounds()
     resource.load_sprites()
 
-    level.create_map(DISPLAYSURF)
+    idx_level = 0
+    show_title_screen()
+    while True: # game loop
+        run_game(idx_level)
+        if gameState == GAME_STATE_DEAD:
+            show_lose_screen()
+        elif gameState == GAME_STATE_WIN:
+            show_win_screen()
+            # advance level here?
 
+
+def run_game(idx_level):
+
+    global gameState
+    # Reset game status and reset the screen to black to start
+    gameState = GAME_STATE_NORMAL
+    DISPLAYSURF.fill(BACKGROUND_COLOR)
+
+    # Load the level file
+    level = Level()
+    level.load(idx_level)
+    # recolor the tiles according to the level requirement
+    resource.recolor_tiles(level)
+    # analyze the data to assign tiles
+    level.analyze_data(DISPLAYSURF)
+
+    # Initialize the pathfinder map
     pf.init_map(level, L_WALL)
 
+    # The EatMan
     eatman = Eatman(level)
 
+    # The ghosts
     ghosts = []
     for i in range(level.nghosts):
         ghosts.append(Ghost(i, level, eatman))
 
+    # The fires
     fires = []
 
     moveLeft  = False
@@ -948,7 +1039,8 @@ def main():
     moveUp    = False
     moveDown  = False    
 
-    while True:
+    loopit = True
+    while loopit:
 
         for event in pygame.event.get():
             if event.type == QUIT:
@@ -984,13 +1076,12 @@ def main():
                     moveDown = False
 
                 elif event.key == K_ESCAPE:
-                    # TODO: game menu
-                    pass 
+                    show_pause_screen()
 
         # Always change the facing direction when eatman is idle.
         # But only animate it if there is valid space to move.
-        if (gameState != GAME_STATE_EATMAN_DYING \
-                and gameState != GAME_STATE_EATMAN_DEAD \
+        if (gameState != GAME_STATE_DYING \
+                and gameState != GAME_STATE_DEAD \
                 and gameState != GAME_STATE_WIN) \
                 and (moveUp or moveDown or moveLeft or moveRight) \
                 and eatman.state & Eatman.IDLE:
@@ -1011,8 +1102,8 @@ def main():
                 if is_valid_position(level, eatman, xoffset=1):
                     eatman.set_state(Eatman.ANIMATE)
 
-        if gameState != GAME_STATE_EATMAN_DYING \
-                and gameState != GAME_STATE_EATMAN_DEAD \
+        if gameState != GAME_STATE_DYING \
+                and gameState != GAME_STATE_DEAD \
                 and gameState != GAME_STATE_WIN:
             # Movements
             eatman.make_move()
@@ -1026,7 +1117,6 @@ def main():
                 eatman.unset_state(Eatman.INVICIBLE)
 
         # Start the drawing
-        DISPLAYSURF.fill(BACKGROUND_COLOR)
         level.draw(DISPLAYSURF)
 
         for id in range(len(fires)-1, -1, -1):
@@ -1038,25 +1128,24 @@ def main():
         for ghost in ghosts:
             ghost.draw(DISPLAYSURF, eatman)
 
-        if gameState == GAME_STATE_EATMAN_DYING:
-            if eatman.animate_dead(DISPLAYSURF) == GAME_STATE_EATMAN_DEAD:
-                break
+        # Dead?
+        if gameState == GAME_STATE_DYING:
+            gameState = eatman.animate_dead(DISPLAYSURF)
+            if gameState == GAME_STATE_DEAD:
+                time.sleep(2)
+                loopit = False
         else:
             eatman.draw(DISPLAYSURF)
-
-
+        
+        # Win?
         if gameState == GAME_STATE_WIN:
-            pass
-            break
+            time.sleep(2)
+            loopit = False
     
+        # Update the actual screen image
         pygame.display.update()
 
         #clock_fps.tick(FPS)
-
-    # Terminate
-    #pygame.quit()
-    #sys.exit()
-
 
 
 if __name__ == '__main__':
