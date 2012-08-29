@@ -11,8 +11,8 @@ SRCDIR                  = os.path.abspath(os.path.dirname(sys.argv[0]))
 
 FPS                     = 60
 
-WINDOW_WIDTH            = 800
-WINDOW_HEIGHT           = 752
+WINDOW_WIDTH            = 504
+WINDOW_HEIGHT           = 609
 
 TILE_WIDTH              = 24
 TILE_HEIGHT             = 24
@@ -58,10 +58,15 @@ CYAN                    = (128, 255, 255, 255)
 ORANGE                  = (255, 128,   0, 255)
 GRASS                   = ( 20, 175,  20, 255)
 PURPLE                  = (128,   0, 255, 255)
+CHOCOLATE               = (210, 105,  30, 255)
+GRAY                    = (185, 185, 185, 255)
+BURLYWOOD               = (222, 184, 135, 255)
+
+ALL_GHOST_COLORS        = [RED, PINK, CYAN, ORANGE, GRASS, PURPLE, CHOCOLATE, GRAY, BURLYWOOD]
+
 BLUE                    = (50,   50, 255, 255)
 WHITE                   = (248, 248, 248, 255)
 BLACK                   = (  0,   0,   0, 255)
-GRAY                    = (185, 185, 185, 255)
 YELLOW                  = (255, 255,   0, 255)
 
 class Config(object):
@@ -250,7 +255,7 @@ class Level(object):
 
         # Create the surface to display the static objects (e.g. walls)
         self.mazeSurf = DISPLAYSURF.copy()
-        #
+        # The dynamic objects including beans
         self.dynamicObjects = {}
 
         # Analyze the data for tile information
@@ -280,14 +285,12 @@ class Level(object):
                             for jj in range(5):
                                 img.set_at((xstart+ii,ystart+jj), self.wallbgcolor)
                     # Draw this wall tile
-                    x, y = uv_to_xy((u,v))
-                    rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
-                    self.mazeSurf.blit(img, rect)
+                    self.mazeSurf.blit(img, uv_to_xy([u, v]))
 
                 # If it is a bean
                 elif tileRes is not None and tileRes[0][0:4] == 'bean':
                     img = resource.tiles[tileRes[0]]
-                    self.dynamicObjects[uv_to_key((u,v))] = Bean((u,v), img)
+                    self.dynamicObjects[uv_to_key([u, v])] = Bean([u, v], img)
 
 
     def analyze_tile(self, ix, iy):
@@ -377,13 +380,13 @@ class Level(object):
             return 'wall-nub', corner_to_erase
 
         elif char == L_EATMAN:
-            self.eatman_params['xy'] = (ix, iy)
+            self.eatman_params['uvpos'] = [ix, iy]
             return None
 
         elif char in [L_GHOST_0, L_GHOST_1, L_GHOST_2, L_GHOST_3, L_GHOST_4, 
                 L_GHOST_5, L_GHOST_6, L_GHOST_7, L_GHOST_8, L_GHOST_9]:
             self.nghosts += 1
-            self.ghost_params[int(char)]['xy'] = (ix, iy)
+            self.ghost_params[int(char)]['uvpos'] = [ix, iy]
             return None
 
         elif char == L_BEAN_BIG:
@@ -408,13 +411,14 @@ class Level(object):
         # draw the daynamic objects, e.g. beans
         for key in self.dynamicObjects:
             obj = self.dynamicObjects[key]
-            DISPLAYSURF.blit(obj.image, uv_to_xy(obj.pos))
+            DISPLAYSURF.blit(obj.image, uv_to_xy(obj.uvpos))
 
 
 class Fire(object):
 
-    def __init__(self, (u, v)):
-        self.u, self.v = u, v
+    def __init__(self, uvpos):
+
+        self.uvpos = uvpos
         self.stime = time.time()
 
         self.lastAnimTime = time.time()
@@ -424,10 +428,8 @@ class Fire(object):
         self.frame_sequence = [1,2,3,4,5,6,7,8,1]
 
     def animate(self, DISPLAYSURF):
-        x, y = uv_to_xy((self.u, self.v))
-        rect = [x, y, TILE_WIDTH, TILE_HEIGHT]
         id = self.frame_sequence[self.idx_frame]
-        DISPLAYSURF.blit(resource.fires['fire-'+str(id)], rect)
+        DISPLAYSURF.blit(resource.fires['fire-'+str(id)], uv_to_xy(self.uvpos))
         if time.time()-self.lastAnimTime > self.animFreq:
             self.idx_frame += 1
             self.lastAnimTime = time.time()
@@ -452,29 +454,46 @@ class Ghost(object):
     # rolls for the next move strategy
     BASE_STEP_MOVE_CYCLE = 10    # 10 cells 
 
-    PUPIL_LR = (8, 9)
-    PUPIL_LL = (5, 9)
-    PUPIL_UR = (8, 6)
-    PUPIL_UL = (5, 6)
+    # The pupil locations
+    PUPIL_L = (5, 8)
+    PUPIL_R = (8, 7)
+    PUPIL_U = (6, 5)
+    PUPIL_D = (7, 10)
 
+    # States
     IDLE      = 1
     ANIMATE   = 2
     DYING     = 4
 
+    # mode
+    SCATTER   = 0
+    CHASE     = 1
+
     def __init__(self, idx, level, eatman):
 
         self.state = Ghost.IDLE
-        self.speed = 3
         self.animFreq = config.get('Ghost','fanimatefrequency')
         self.speed = config.get('Ghost','ispeed')
         self.pathway = ''
 
-        self.max_step_move_cycle = Ghost.BASE_STEP_MOVE_CYCLE + random.randint(-3,3)
-        self.nsteps_move_cycle = 0
-        self.move_strategy = ''
+        self.mode = Ghost.SCATTER
+        self.mode_alter_sequency = [7, 20, 7, 20, 5, 20, 0.5, -1]
 
-        self.x, self.y = uv_to_xy(level.ghost_params[idx]['xy'])
-        self.color = level.ghost_params[idx]['color']
+        self.xypos = uv_to_xy(level.ghost_params[idx]['uvpos'])
+
+        if idx == 0:
+            self.color = CYAN
+        elif idx == 1:
+            self.color = PINK
+        elif idx == 2:
+            self.color = ORANGE
+        elif idx == 3:
+            self.color = RED
+        else:
+            self.color = random.choice(ALL_GHOST_COLORS)
+
+        if level.ghost_params[idx].has_key('color'):
+            self.color = level.ghost_params[idx]['color']
 
         if level.ghost_params[idx].has_key('fast'):
             self.animFreq /= level.ghost_params[idx]['fast']
@@ -495,19 +514,24 @@ class Ghost(object):
                     time.time(), -1)
 
         self.pupil_color = BLACK
-        self.pupil_pos = Ghost.PUPIL_LR
+        self.pupil_pos = random.choice(
+                        [Ghost.PUPIL_L, Ghost.PUPIL_R, Ghost.PUPIL_U, Ghost.PUPIL_D])
 
         self.direction = STATIC
-        self.moved_from = None
+        self.movedFrom = None
 
         self.load_sprites()
         self.idx_frame = 0
         self.lastAnimTime = time.time()
 
-        self.u_dyingto, self.v_dyingto = level.ghost_params[0]['xy']
+        self.u_dyingto, self.v_dyingto = level.ghost_params[0]['uvpos']
 
         self.targetX = 0
         self.targetY = 0
+
+        self.max_step_move_cycle = Ghost.BASE_STEP_MOVE_CYCLE + random.randint(-3,3)
+        self.nsteps_move_cycle = 0
+        self.move_strategy = ''
 
 
     def set_state(self, adds):
@@ -556,16 +580,17 @@ class Ghost(object):
 
             img = self.frames[self.idx_frame].copy()
             # set the eye ball position
-            if eatman.x > self.x and eatman.y > self.y:
-                self.pupil_pos = Ghost.PUPIL_LR
-            elif eatman.x < self.x and eatman.y > self.y:
-                self.pupil_pos = Ghost.PUPIL_LL
-            elif eatman.x > self.x and eatman.y < self.y:
-                self.pupil_pos = Ghost.PUPIL_UR
-            elif eatman.x < self.x and eatman.y < self.y:
-                self.pupil_pos = Ghost.PUPIL_UL
+            if self.direction == LEFT:
+                self.pupil_pos = Ghost.PUPIL_L
+            elif self.direction == RIGHT:
+                self.pupil_pos = Ghost.PUPIL_R
+            elif self.direction == UP:
+                self.pupil_pos = Ghost.PUPIL_U
+            elif self.direction == DOWN:
+                self.pupil_pos = Ghost.PUPIL_D
             else:
-                self.pupil_pos = Ghost.PUPIL_LL
+                self.pupil_pos = random.choice(
+                        [Ghost.PUPIL_L, Ghost.PUPIL_R, Ghost.PUPIL_U, Ghost.PUPIL_D])
             # draw eye balls
             for y in range(self.pupil_pos[1], self.pupil_pos[1]+3):
                 for x in range(self.pupil_pos[0], self.pupil_pos[0]+2):
@@ -579,8 +604,7 @@ class Ghost(object):
                 if idx_frame % 2 == 0:
                     img = resource.ghost_recover['ghost-freighten-'+str(idx_frame)]
                     
-        rect = [self.x, self.y, TILE_WIDTH, TILE_HEIGHT]
-        DISPLAYSURF.blit(img, rect)
+        DISPLAYSURF.blit(img, self.xypos)
 
 
     def make_move(self, level, eatman, fires):
@@ -600,33 +624,33 @@ class Ghost(object):
                 self.idx_frame = 0
                 self.set_state(Ghost.IDLE)
                 self.nsteps_move_cycle += 1
-                self.moved_from = get_opposite_direction(self.direction)
+                self.movedFrom = get_opposite_direction(self.direction)
                 # drop fire
                 if self.moltenPercent>0 and len(fires)<config.get('Fire','imaxfire') \
                         and random.randint(1,100)<self.moltenPercent:
-                    fires.append(Fire(xy_to_uv((self.x, self.y))))
+                    fires.append(Fire(xy_to_uv(self.xypos)))
             else:
                 if self.direction == DOWN:
-                    self.y += self.speed
+                    self.xypos[1] += self.speed
                 elif self.direction == UP:
-                    self.y -= self.speed
+                    self.xypos[1] -= self.speed
                 elif self.direction == LEFT:
-                    self.x -= self.speed
+                    self.xypos[0] -= self.speed
                 elif self.direction == RIGHT:
-                    self.x += self.speed
+                    self.xypos[0] += self.speed
                 self.lastAnimTime = time.time()
 
         # If it is not animating, we need to figure out where to go for the next animation cycle
         if self.state & Ghost.IDLE:
 
             if self.state & Ghost.DYING:
-                su, sv = xy_to_uv((self.x, self.y))
+                su, sv = xy_to_uv(self.xypos)
                 if su==self.u_dyingto and sv==self.v_dyingto:
                     self.unset_state(Ghost.DYING)
                     self.pathway = ''
                 else:
-                    self.pathway = pf.simplepath(level, self, (sv, su), 
-                            (self.v_dyingto, self.u_dyingto), is_valid_position)
+                    self.pathway = pf.simplepath(level, self, [su, sv], 
+                            [self.u_dyingto, self.v_dyingto], is_valid_position)
 
             elif len(self.pathway) > 0: # if there is a existing pathway
                 # re-roll the strategy if it is expired
@@ -634,9 +658,9 @@ class Ghost(object):
                     self.nsteps_move_cycle = 0
                     if random.randint(1,100) <= self.seekerPercent:
                         self.move_strategy = 'seeker'
-                        su, sv = xy_to_uv((self.x, self.y))
-                        eu, ev = xy_to_uv((eatman.x, eatman.y))
-                        self.pathway = pf.astarpath((sv, su), (ev, eu))
+                        su, sv = xy_to_uv(self.xypos)
+                        eu, ev = xy_to_uv(eatman.xypos)
+                        self.pathway = pf.astarpath([su, sv], [eu, ev])
                         self.targetX = eu
                         self.targetY = ev
                     else:
@@ -644,14 +668,14 @@ class Ghost(object):
                         self.pathway = pf.randpath(level, self, eatman, is_valid_position)
 
                 if self.move_strategy == 'seeker':
-                    u, v = xy_to_uv((eatman.x, eatman.y))
+                    u, v = xy_to_uv(eatman.xypos)
                     if self.targetX == u or self.targetY == v \
                             or ((self.targetX-u)**2+(self.targetY-v)**2)<18:
                         pass
                     else:
-                        su, sv = xy_to_uv((self.x, self.y))
-                        eu, ev = xy_to_uv((eatman.x, eatman.y))
-                        self.pathway = pf.astarpath((sv, su), (ev, eu))
+                        su, sv = xy_to_uv(self.xypos)
+                        eu, ev = xy_to_uv(eatman.xypos)
+                        self.pathway = pf.astarpath([su, sv], [eu, ev])
                         self.targetX = eu
                         self.targetY = ev
 
@@ -661,9 +685,9 @@ class Ghost(object):
                     # re-roll the strategy
                     if random.randint(1,100) <= self.seekerPercent: # seek it
                         self.move_strategy = 'seeker'
-                        su, sv = xy_to_uv((self.x, self.y))
-                        eu, ev = xy_to_uv((eatman.x, eatman.y))
-                        self.pathway = pf.astarpath((sv, su), (ev, eu))
+                        su, sv = xy_to_uv(self.xypos)
+                        eu, ev = xy_to_uv(eatman.xypos)
+                        self.pathway = pf.astarpath([su, sv], [eu, ev])
                         self.targetX = eu
                         self.targetY = ev
                     else: # random path
@@ -671,9 +695,9 @@ class Ghost(object):
                         self.pathway = pf.randpath(level, self, eatman, is_valid_position)
                 else:
                     if self.move_strategy == 'seeker':
-                        su, sv = xy_to_uv((self.x, self.y))
-                        eu, ev = xy_to_uv((eatman.x, eatman.y))
-                        self.pathway = pf.astarpath((sv, su), (ev, eu))
+                        su, sv = xy_to_uv(self.xypos)
+                        eu, ev = xy_to_uv(eatman.xypos)
+                        self.pathway = pf.astarpath([su, sv], [eu, ev])
                         self.targetX = eu
                         self.targetY = ev
                     elif self.move_strategy == 'random':
@@ -694,6 +718,7 @@ class Ghost(object):
             self.direction = STATIC
 
 
+
 class Eatman(object):
     '''
     The Eatman class for managing the Player.
@@ -710,7 +735,7 @@ class Eatman(object):
         self.direction      = STATIC
         self.nlifes         = 3
 
-        self.x, self.y = uv_to_xy(level.eatman_params['xy'])
+        self.xypos = uv_to_xy(level.eatman_params['uvpos'])
 
         self.animFreq = config.get('Eatman', 'fanimatefrequency')
         self.speed = config.get('Eatman','ispeed')
@@ -776,28 +801,24 @@ class Eatman(object):
                 self.set_state(Eatman.IDLE)
             else:
                 if self.direction == DOWN:
-                    self.y += self.speed
+                    self.xypos[1] += self.speed
                 elif self.direction == UP:
-                    self.y -= self.speed
+                    self.xypos[1] -= self.speed
                 elif self.direction == LEFT:
-                    self.x -= self.speed
+                    self.xypos[0] -= self.speed
                 elif self.direction == RIGHT:
-                    self.x += self.speed
+                    self.xypos[0] += self.speed
                 self.lastAnimTime = time.time()
 
 
     def draw(self, DISPLAYSURF):
 
-        rect = [self.x, self.y, TILE_WIDTH, TILE_HEIGHT]
-
         if self.direction == STATIC:
-            DISPLAYSURF.blit(self.frames[self.direction], rect)
+            DISPLAYSURF.blit(self.frames[self.direction], self.xypos)
         else:
-            DISPLAYSURF.blit(self.frames[self.direction][self.idx_frame], rect)
+            DISPLAYSURF.blit(self.frames[self.direction][self.idx_frame], self.xypos)
 
     def animate_dead(self, DISPLAYSURF):
-
-        rect = [self.x, self.y, TILE_WIDTH, TILE_HEIGHT]
 
         # Animate it
         if time.time()-self.lastAnimTime>self.animFreq*4.0:
@@ -808,38 +829,40 @@ class Eatman(object):
                 return GAME_STATE_DEAD
 
         # drawing
-        DISPLAYSURF.blit(self.frames_dead[self.idx_frame], rect)
+        DISPLAYSURF.blit(self.frames_dead[self.idx_frame], self.xypos)
 
         return GAME_STATE_DYING
 
+
+
 class Bean(object):
-    def __init__(self, (u, v), image):
-        self.pos = (u, v)
+    def __init__(self, uvpos, image):
+        self.uvpos = uvpos
         self.image = image
 
 
-def uv_to_key((u, v)):
+def uv_to_key(uvpos):
     '''
     Create a dictionary key using the u, v grid cell coordinates
     '''
-    return str(u) + ',' + str(v)
+    return str(uvpos[0]) + ',' + str(uvpos[1])
 
 
 # x, y is column, row
-def xy_to_uv((x, y)):
+def xy_to_uv(xypos):
     '''
     Convert the screen pixel coordinates to the board grid coordinates.
     The results are rounded to the nearest integers.
     '''
-    return (int(round((x-config.get('Game','ixmargin'))*1.0/TILE_WIDTH)),
-            int(round((y-config.get('Game','iymargin'))*1.0/TILE_HEIGHT)))
+    return [int(round((xypos[0]-config.get('Game','ixmargin'))*1.0/TILE_WIDTH)),
+            int(round((xypos[1]-config.get('Game','iymargin'))*1.0/TILE_HEIGHT))]
 
-def uv_to_xy((u, v)):
+def uv_to_xy(uvpos):
     '''
     Convert the board grid coordinates to screen pixel coordinates
     '''
-    return (config.get('Game','ixmargin')+u*TILE_WIDTH,
-            config.get('Game','iymargin')+v*TILE_HEIGHT)
+    return [config.get('Game','ixmargin')+uvpos[0]*TILE_WIDTH,
+            config.get('Game','iymargin')+uvpos[1]*TILE_HEIGHT]
 
 def get_opposite_direction(direction):
     if direction == UP:
@@ -853,16 +876,16 @@ def get_opposite_direction(direction):
 
 
 
-def is_valid_position(level, entity, xoffset=0, yoffset=0):
+def is_valid_position(level, entity, uoffset=0, voffset=0):
 
-    x, y = xy_to_uv((entity.x, entity.y))
-    x += xoffset
-    y += yoffset
+    u, v = xy_to_uv(entity.xypos)
+    u += uoffset
+    v += voffset
 
-    if x >= level.ncols or y >=level.nrows or x <= 0 or y <= 0:
+    if u >= level.ncols or v >=level.nrows or u <= 0 or v <= 0:
         return False
 
-    if level.data[y][x] not in [L_WALL,]:
+    if level.data[v][u] not in [L_WALL,]:
         return True
     else:
         return False
@@ -870,11 +893,10 @@ def is_valid_position(level, entity, xoffset=0, yoffset=0):
 
 def check_hit(level, eatman, ghosts, fires):
 
-    x, y = xy_to_uv((eatman.x, eatman.y))
+    u, v = xy_to_uv(eatman.xypos)
 
     for ghost in ghosts:
-        gx, gy = xy_to_uv((ghost.x, ghost.y))
-        if x==gx and y==gy:
+        if [u, v] == xy_to_uv(ghost.xypos):
             if eatman.state & Eatman.INVICIBLE:
                 ghost.set_state(Ghost.DYING)
             elif ghost.state & Ghost.DYING:
@@ -884,14 +906,14 @@ def check_hit(level, eatman, ghosts, fires):
                 return GAME_STATE_DYING
 
     for fire in fires:
-        if x==fire.u and y==fire.v:
+        if fire.uvpos == [u, v]:
             eatman.idx_frame = 0
             return GAME_STATE_DYING
 
     # Check if a bean is hit
-    if level.data[y][x] == L_BEAN:
-        level.data[y][x] = L_EMPTY
-        del level.dynamicObjects[uv_to_key((x,y))]
+    if level.data[v][u] == L_BEAN:
+        level.data[v][u] = L_EMPTY
+        del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
         resource.sounds['bean-'+str(level.idx_beansound)].play()
         level.idx_beansound += 1
@@ -901,9 +923,9 @@ def check_hit(level, eatman, ghosts, fires):
             return GAME_STATE_WIN
 
     # Big beans
-    if level.data[y][x] == L_BEAN_BIG:
-        level.data[y][x] = L_EMPTY
-        del level.dynamicObjects[uv_to_key((x,y))]
+    if level.data[v][u] == L_BEAN_BIG:
+        level.data[v][u] = L_EMPTY
+        del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
         resource.sounds['bean-big'].play()
         if level.nbeans == 0:
@@ -933,7 +955,7 @@ def show_text_screen(text):
     DISPLAYSURF.blit(titleSurf, titleRect)
 
     # Draw the additional "Press a key to play." text.
-    pressKeySurf, pressKeyRect = make_text_image('Press a key to play.', BASICFONT, WHITE)
+    pressKeySurf, pressKeyRect = make_text_image('Press Enter to play.', BASICFONT, WHITE)
     pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 100)
     DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
 
@@ -944,10 +966,10 @@ def show_text_screen(text):
 def check_for_quit():
     for event in pygame.event.get(QUIT): # get all the QUIT events
         terminate() # terminate if any QUIT events are present
-    for event in pygame.event.get(KEYUP): # get all the KEYUP events
-        if event.key == K_ESCAPE:
-            terminate() # terminate if the KEYUP event was for the Esc key
-        pygame.event.post(event) # put the other KEYUP event objects back
+    #for event in pygame.event.get(KEYUP): # get all the KEYUP events
+    #    if event.key == K_ESCAPE:
+    #        terminate() # terminate if the KEYUP event was for the Esc key
+    #    pygame.event.post(event) # put the other KEYUP event objects back
 
 def check_for_key_press():
     # Go through event queue looking for a KEYUP event.
@@ -956,7 +978,8 @@ def check_for_key_press():
     for event in pygame.event.get([KEYDOWN, KEYUP]):
         if event.type == KEYDOWN:
             continue
-        return event.key
+        if event.key == K_RETURN:
+            return event.key
     return None
 
 def terminate():
@@ -965,7 +988,7 @@ def terminate():
 
 
 def show_pause_screen():
-    pass
+    show_text_screen('PAUSE')
 
 def show_title_screen():
     show_text_screen('EatMan')
@@ -1007,9 +1030,12 @@ def main():
 
 def run_game(idx_level):
 
-    global gameState
+    global gameState, DISPLAYSURF
+
     # Reset game status and reset the screen to black to start
     gameState = GAME_STATE_NORMAL
+
+    # Erase the screen 
     DISPLAYSURF.fill(BACKGROUND_COLOR)
 
     # Load the level file
@@ -1076,7 +1102,12 @@ def run_game(idx_level):
                     moveDown = False
 
                 elif event.key == K_ESCAPE:
+                    pauseSTime = time.time()
                     show_pause_screen()
+                    pauseDruation = time.time()-pauseSTime
+                    eatman.lastInvicibleTime += pauseDruation
+                    for fire in fires:
+                        fire.stime += pauseDruation
 
         # Always change the facing direction when eatman is idle.
         # But only animate it if there is valid space to move.
@@ -1087,19 +1118,19 @@ def run_game(idx_level):
                 and eatman.state & Eatman.IDLE:
             if moveUp: 
                 eatman.direction = UP 
-                if is_valid_position(level, eatman, yoffset=-1):
+                if is_valid_position(level, eatman, voffset=-1):
                     eatman.set_state(Eatman.ANIMATE)
             elif moveDown: 
                 eatman.direction = DOWN
-                if is_valid_position(level, eatman, yoffset=1):
+                if is_valid_position(level, eatman, voffset=1):
                     eatman.set_state(Eatman.ANIMATE)
             elif moveLeft:
                 eatman.direction = LEFT
-                if is_valid_position(level, eatman, xoffset=-1):
+                if is_valid_position(level, eatman, uoffset=-1):
                     eatman.set_state(Eatman.ANIMATE)
             elif moveRight:
                 eatman.direction = RIGHT
-                if is_valid_position(level, eatman, xoffset=1):
+                if is_valid_position(level, eatman, uoffset=1):
                     eatman.set_state(Eatman.ANIMATE)
 
         if gameState != GAME_STATE_DYING \

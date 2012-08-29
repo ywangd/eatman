@@ -42,21 +42,24 @@ class Pathfinder(object):
         self.neighborSet = [ (0, -1), (0, 1), (-1, 0), (1, 0) ]
 
 
-    def simplepath(self, level, ghost, (sv, su), (ev, eu), pos_check_func):
+    def simplepath(self, level, ghost, suvpos, euvpos, pos_check_func):
+
+        su, sv = suvpos
+        eu, ev = euvpos
         
         moveto = [UP, LEFT, DOWN, RIGHT]
 
-        if ghost.moved_from == UP or (not pos_check_func(level, ghost, yoffset=-1)):
+        if ghost.movedFrom == UP or (not pos_check_func(level, ghost, voffset=-1)):
             moveto.remove(UP)
-        if ghost.moved_from == DOWN or (not pos_check_func(level, ghost, yoffset=1)):
+        if ghost.movedFrom == DOWN or (not pos_check_func(level, ghost, voffset=1)):
             moveto.remove(DOWN)
-        if ghost.moved_from == LEFT or (not pos_check_func(level, ghost, xoffset=-1)):
+        if ghost.movedFrom == LEFT or (not pos_check_func(level, ghost, uoffset=-1)):
             moveto.remove(LEFT)
-        if ghost.moved_from == RIGHT or (not pos_check_func(level, ghost, xoffset=1)):
+        if ghost.movedFrom == RIGHT or (not pos_check_func(level, ghost, uoffset=1)):
             moveto.remove(RIGHT)
 
         if len(moveto) == 0:
-            return ghost.moved_from
+            return ghost.movedFrom
 
         mindist = Pathfinder.HIGH_COST
         for mt in moveto:
@@ -78,28 +81,28 @@ class Pathfinder(object):
 
     def randpath(self, level, ghost, eatman, pos_check_func):
         moveto = [UP, LEFT, DOWN, RIGHT]
-        if ghost.moved_from == UP or (not pos_check_func(level, ghost, yoffset=-1)):
+        if ghost.movedFrom == UP or (not pos_check_func(level, ghost, voffset=-1)):
             moveto.remove(UP)
-        if ghost.moved_from == DOWN or (not pos_check_func(level, ghost, yoffset=1)):
+        if ghost.movedFrom == DOWN or (not pos_check_func(level, ghost, voffset=1)):
             moveto.remove(DOWN)
-        if ghost.moved_from == LEFT or (not pos_check_func(level, ghost, xoffset=-1)):
+        if ghost.movedFrom == LEFT or (not pos_check_func(level, ghost, uoffset=-1)):
             moveto.remove(LEFT)
-        if ghost.moved_from == RIGHT or (not pos_check_func(level, ghost, xoffset=1)):
+        if ghost.movedFrom == RIGHT or (not pos_check_func(level, ghost, uoffset=1)):
             moveto.remove(RIGHT)
 
         if len(moveto) == 0:
-            return ghost.moved_from
+            return ghost.movedFrom
 
         return random.choice(moveto)
 
 
-    def astarpath(self, (sv, su), (ev, eu)):
+    def astarpath(self, suvpos, euvpos):
 
         self.clear_temp_vars()
         
         # (row, col) tuples
-        self.spos = (sv, su)
-        self.epos = (ev, eu)
+        self.spos = (suvpos[1], suvpos[0])
+        self.epos = (euvpos[1], euvpos[0])
 
         # add start node to open list
         self.add_to_openlist( self.spos )
