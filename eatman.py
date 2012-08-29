@@ -34,6 +34,7 @@ RIGHT                   = 'r'
 
 L_BLOCK                 = '#' # so no bean will be there
 L_WALL                  = '*'
+L_GHOST_DOOR            = '='
 L_EMPTY                 = ' '
 L_BEAN                  = '.'
 L_BEAN_BIG              = 'O'
@@ -204,8 +205,9 @@ class Level(object):
         self.nghosts = 0
         self.ghost_params = {}
 
-    def load(self, ilevel):
-        infile = open(os.path.join(SRCDIR, 'levels', str(ilevel)+'.dat'))
+    def load(self, iLevel):
+        self.iLevel = iLevel
+        infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
         self.data = []
         for line in infile.readlines():
             line = line.strip()
@@ -294,6 +296,13 @@ class Level(object):
                     img = resource.tiles[tileRes[0]]
                     self.dynamicObjects[uv_to_key([u, v])] = Bean([u, v], img)
 
+        # draw other static objects
+        theSurf, theRect = make_text_image('score', BASICFONT, WHITE)
+        theRect.bottomright = (WINDOW_WIDTH-10, 21)
+        self.mazeSurf.blit(theSurf, theRect)
+
+        
+
 
     def analyze_tile(self, ix, iy):
         '''
@@ -380,6 +389,10 @@ class Level(object):
                 return 'wall-end-t', corner_to_erase
 
             return 'wall-nub', corner_to_erase
+
+        elif char == L_GHOST_DOOR:
+            self.uvpos_ghostdoor = [ix, iy]
+            return 'ghost-door', corner_to_erase
 
         elif char == L_EATMAN:
             self.eatman_params['uvpos'] = [ix, iy]
@@ -486,17 +499,19 @@ class Ghost(object):
 
         self.mode = Ghost.MODE_SCATTER
         self.oldMode = self.mode
-        # mode alter sequence
-        self.ma_sequence = [
-                7, 20,
-                7, 20,
-                5, 20,
-                5, -1]
-        self.lastMaTime = time.time()
-        self.idx_modeduration = 0
+
+        self.nalters = 0 # how many mode alternation has happened
+        self.lastMaTime = time.time() # last mode alternation time
+
+        self.mode_duration_base = {}
+        self.mode_duration_base[Ghost.MODE_SCATTER] = 6 - level.iLevel*0.5
+        if self.mode_duration_base[Ghost.MODE_SCATTER] < 0:
+            self.mode_duration_base[Ghost.MODE_SCATTER] = 0.02
+        self.mode_duration_base[Ghost.MODE_CHASE] = 15 + level.iLevel*0.5
+        self.mode_duration = self.generate_mode_duration()
 
         self.lastDeadTime = time.time()
-        self.deadduration = 5.0
+        self.dead_duration = 5.0
 
         self.xypos = uv_to_xy(level.ghost_params[idx]['uvpos'])
         self.uvpos_target = [0, 0]
@@ -511,27 +526,40 @@ class Ghost(object):
         self.idx_frame = 0
         self.lastAnimTime = time.time()
 
+        self.lastIndoorTime = time.time()
+
         # Default settings for different IDs
         if idx == 0:
             self.color = CYAN
             self.uvpos_home = [level.ncols-1, level.nrows+1]
             self.tps = Ghost.TPS_WHIMSICAL
+            self.indoor_duration = 5 - level.iLevel*0.5
+            if self.indoor_duration < 0:
+                self.indoor_duration = 0
         elif idx == 1:
             self.color = PINK
             self.uvpos_home = [2, -2]
             self.tps = Ghost.TPS_AMBUSHER
+            self.indoor_duration = 0
         elif idx == 2:
             self.color = ORANGE
             self.uvpos_home = [0, level.nrows+1]
             self.tps = Ghost.TPS_IGNORANCE
+            self.indoor_duration = 10 - level.iLevel*0.5
+            if self.indoor_duration < 0:
+                self.indoor_duration = 0
         elif idx == 3:
             self.color = RED
             self.uvpos_home = [level.ncols-3, -2]
             self.tps = Ghost.TPS_PURSUER
+            self.indoor_duration = 0
         else:
             self.color = random.choice(ALL_GHOST_COLORS)
             self.uvpos_home = [level.ncols-3, -2]
             self.tps = random.choice(Ghost.TPS_ALL)
+            self.indoor_duration = random.randint(0,10) - level.iLevel*0.5
+            if self.indoor_duration < 0:
+                self.indoor_duration = 0
 
         # The pursuer is speical
         if self.tps == Ghost.TPS_PURSUER and Ghost.pursuer is None:
@@ -590,51 +618,85 @@ class Ghost(object):
             # Add this frame to the list
             self.frames.append(img)
 
+    def generate_mode_duration(self):
+
+        radius = self.mode_duration_base[self.mode] / 3.0
+        # modify the duration by the number of alternation time
+        if self.mode == Ghost.MODE_SCATTER:
+            lbound = -radius - self.nalters*0.5
+            ubound = radius - self.nalters*0.5
+        elif self.mode == Ghost.MODE_CHASE:
+            lbound = -radius + self.nalters*0.5
+            ubound = radius + self.nalters*0.5
+
+        mode_duration = self.mode_duration_base[self.mode] + random.uniform(-radius, radius)
+        if mode_duration < 0:
+            mode_duration = 0.02
+
+        return mode_duration
+
+    def move_outdoor(self, level):
+        if time.time() - self.lastIndoorTime < self.indoor_duration:
+            return False
+
+        # get out of the door
+        uvpos = xy_to_uv(self.xypos)
+        if uvpos[1] == level.uvpos_ghostdoor[1]+1 \
+                and uvpos[0] >= level.uvpos_ghostdoor[0]-1 \
+                and uvpos[0] <= level.uvpos_ghostdoor[0]+1:
+            if uvpos[0] == level.uvpos_ghostdoor[0]-1:
+                self.pathway = 'ruu'
+            elif uvpos[0] == level.uvpos_ghostdoor[0]:
+                self.pathway = 'uu'
+            elif uvpos[0] == level.uvpos_ghostdoor[0]+1:
+                self.pathway = 'luu'
+            return True
+
+        return False
+
 
     def alter_mode(self):
 
-        altered = False
-        if self.mode == Ghost.MODE_SCATTER or self.mode == Ghost.MODE_CHASE:
+        # We only need alter the mode when the ghost is in scatter or chase mode
+        if (self.mode == Ghost.MODE_SCATTER or self.mode == Ghost.MODE_CHASE) \
+                and time.time()-self.lastMaTime > self.mode_duration:
 
-            modeduration = self.ma_sequence[self.idx_modeduration]
-            if modeduration>0 and time.time()-self.lastMaTime>modeduration:
+            if self.mode == Ghost.MODE_SCATTER:
+                self.mode = Ghost.MODE_CHASE
+            elif self.mode == Ghost.MODE_CHASE:
+                self.mode = Ghost.MODE_SCATTER
 
-                if self.mode == Ghost.MODE_SCATTER:
-                    self.oldMode = self.mode
-                    self.mode = Ghost.MODE_CHASE
+            self.mode_duration = self.generate_mode_duration()
+            self.lastMaTime = time.time()
+            # reverse the direction when mode alternation happens
+            self.pathway = get_opposite_direction(self.direction)
+            self.nalters += 1
 
-                elif self.mode == Ghost.MODE_CHASE:
-                    self.oldMode = self.mode
-                    self.mode = Ghost.MODE_SCATTER
+            return True
 
-                self.pathway = get_opposite_direction(self.direction)
-                self.idx_modeduration += 1
-                if self.idx_modeduration >= len(self.ma_sequence):
-                    self.idx_modeduration -= 1
-
-                altered = True
-
-        if self.pathway is None:
-            print 'here'
-
-        return altered
+        return False
 
 
     def draw(self, DISPLAYSURF, eatman):
 
+        # No drawing is necessary when the ghost is dead
         if self.mode == Ghost.MODE_DEAD:
             return
 
-        if self.mode == Ghost.MODE_DYING: # if ghost is dying to reset position
+        # if ghost is dying to reset position, the image is a pair of glasses
+        if self.mode == Ghost.MODE_DYING: 
             img = resource.glasses['glasses']
 
-        elif self.mode == Ghost.MODE_FREIGHTEN: # if ghost is freightened
+        # if ghost is freightened, they are in blue color
+        elif self.mode == Ghost.MODE_FREIGHTEN: 
             idx_frame = self.idx_frame % len(resource.ghost_freighten) + 1
             img = resource.ghost_freighten['ghost-freighten-'+str(idx_frame)]
+            # Flash the ghost when the freighten timer has 1.5 seconds left
             if time.time()-eatman.lastSlayerTime > config.get('Eatman','finvincibleduration')-1.5:
                 if idx_frame % 2 == 0:
                     img = resource.ghost_recover['ghost-freighten-'+str(idx_frame)]
 
+        # All the other modes, scatter, chase
         else:
             img = self.frames[self.idx_frame].copy()
             # set the eye ball position
@@ -661,20 +723,24 @@ class Ghost(object):
 
     def make_move(self, level, eatman, fires):
 
+        # If the ghost is dead, we may not need any moves
         if self.mode == Ghost.MODE_DEAD:
-            if time.time()-self.lastDeadTime > self.deadduration:
+            # if the dead timer expires, we let the ghost return to scatter mode and reset timers
+            if time.time()-self.lastDeadTime > self.dead_duration:
                 self.mode = Ghost.MODE_SCATTER
-                self.idx_modeduration = 0
+                self.mode_duration = self.generate_mode_duration()
                 self.lastMaTime = time.time() 
+                # the ghost is respawned and ready to make moves now
             else:
-                return
+                return # the ghost is still dead and no move is needed
 
+        # If the ghost is in freightened mode
         if self.mode == Ghost.MODE_FREIGHTEN:
+            # check if the mode expires
             if time.time()-eatman.lastSlayerTime > config.get('Eatman','finvincibleduration'):
-                self.mode = self.oldMode
-
-        # Try alter the mode
-        self.alter_mode()
+                self.mode = self.oldMode # restore the old mode before the freightened mode
+                self.lastMaTime += time.time() - eatman.lastSlayerTime # re-calculate timers
+                # now ready to make moves
 
         # Calculate its animation frequency
         animFreq = self.animFreq
@@ -684,18 +750,22 @@ class Ghost(object):
         elif self.mode == Ghost.MODE_DYING: # Make ghost move faster when dying
             animFreq /= 4.0
 
-        # If it is in middle of an animation, keep doint it till the cycle is done.
+        # If it is in middle of an animation and its time to refresh a new frame 
+        # keep doing it till the cycle is done.
         if self.motion == Ghost.MOTION_ANIMATE and time.time()-self.lastAnimTime>animFreq:
             self.idx_frame += 1
+            # if we are at the last frame of the cycle, we need to reset the frame
+            # and make the ghost idle and ready for next move
             if self.idx_frame >= self.nframes:
                 self.idx_frame = 0
                 self.motion = Ghost.MOTION_IDLE
                 self.movedFrom = get_opposite_direction(self.direction)
-                # drop a fire
-                if self.moltenPercent>0 and len(fires)<config.get('Fire','imaxfire') \
-                        and random.randint(1,100)<self.moltenPercent:
-                    fires.append(Fire(xy_to_uv(self.xypos)))
-            else:
+                # drop a fire only when a motion cycle is completed
+                if self.mode == Ghost.MODE_SCATTER or self.mode == Ghost.MODE_CHASE:
+                    if self.moltenPercent>0 and len(fires)<config.get('Fire','imaxfire') \
+                            and random.randint(1,100)<self.moltenPercent:
+                        fires.append(Fire(xy_to_uv(self.xypos)))
+            else: # animate this frame
                 if self.direction == DOWN:
                     self.xypos[1] += self.speed
                 elif self.direction == UP:
@@ -707,31 +777,46 @@ class Ghost(object):
                 self.lastAnimTime = time.time()
 
         # If it is not animating, we need to figure out where to go for the next animation cycle
-        elif self.motion == Ghost.MOTION_IDLE:
+        # NOTE: this must be a separate if, not an elif
+        if self.motion == Ghost.MOTION_IDLE:
 
             # simply follow the pathway if it is not empty
             if len(self.pathway) > 0:
-                pass
+                self.follow_pathway()
+                return
 
-            # if no existing pathway
-            elif self.mode == Ghost.MODE_DYING:
-                su, sv = xy_to_uv(self.xypos)
-                if self.uvpos_dyingto == [su, sv]:
+            # if the ghost is dying to reset point
+            if self.mode == Ghost.MODE_DYING:
+                # if the ghost has reached the reset point, we make it dead
+                if self.uvpos_dyingto == xy_to_uv(self.xypos):
                     self.mode = Ghost.MODE_DEAD
+                    self.pathway = ''
                     self.lastDeadTime = time.time()
                 else:
                     self.pathway = simplepath(level, self, self.uvpos_dyingto)
+                    # now we can follow the path
 
+            # if the ghost is freightened, we make random path
             elif self.mode == Ghost.MODE_FREIGHTEN: 
-                # choose random path if it is freighten
                 self.pathway = randpath(level, self)
+                # now we can follow the path
 
             else:  # normal state behaviour
+
+                # Try alter the mode only in idle motion and scatter or chase mode
+                self.alter_mode() # this may give a new path 
+                # Try move out of the door only in idle motion and scatter or chase mode
+                self.move_outdoor(level) # this may give a new path too
+
+                if len(self.pathway) > 0:
+                    self.follow_pathway()
+                    return
+
                 # In scatter mode, the ghost seek to its home position
                 if self.mode == Ghost.MODE_SCATTER:
                     euvpos = self.uvpos_home
 
-                else:
+                elif self.mode == Ghost.MODE_CHASE:
                     # generate a path based on the ghost's target picking strategy
                     if self.tps == Ghost.TPS_WHIMSICAL:
                         e_uvpos = xy_to_uv(eatman.xypos)
@@ -760,6 +845,9 @@ class Ghost(object):
 
                     elif self.tps == Ghost.TPS_PURSUER:
                         euvpos = xy_to_uv(eatman.xypos)
+                else:
+                    print 'the code shouldnt come here. something is wrong.'
+                    sys.exit(1)
 
                 # Generate the pathway
                 self.pathway = simplepath(level, self, euvpos)
@@ -808,6 +896,8 @@ class Eatman(object):
         self.lastAnimTime = time.time()
 
         self.lastSlayerTime = time.time()
+
+        self.nbeans = 0
 
 
     def load_sprites(self):
@@ -999,7 +1089,11 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
     if u >= level.ncols or v >=level.nrows or u <= 0 or v <= 0:
         return False
 
-    if level.data[v][u] not in [L_WALL,]:
+    blocks = [L_WALL, L_GHOST_DOOR]
+    if isinstance(entity, Ghost) and entity.mode==Ghost.MODE_DYING:
+        blocks.remove(L_GHOST_DOOR)
+
+    if level.data[v][u] not in blocks:
         return True
     else:
         return False
@@ -1013,7 +1107,7 @@ def check_hit(level, eatman, ghosts, fires):
         if [u, v] == xy_to_uv(ghost.xypos):
             if ghost.mode == Ghost.MODE_FREIGHTEN:
                 ghost.mode = ghost.MODE_DYING
-            elif ghost.mode == Ghost.MODE_DYING:
+            elif ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
                 pass
             else:
                 eatman.idx_frame = 0
@@ -1029,6 +1123,7 @@ def check_hit(level, eatman, ghosts, fires):
         level.data[v][u] = L_EMPTY
         del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
+        eatman.nbeans += 1
         resource.sounds['bean-'+str(level.idx_beansound)].play()
         level.idx_beansound += 1
         if level.idx_beansound >=2:
@@ -1041,18 +1136,26 @@ def check_hit(level, eatman, ghosts, fires):
         level.data[v][u] = L_EMPTY
         del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
+        eatman.nbeans += 1
         resource.sounds['bean-big'].play()
         if level.nbeans == 0:
             return GAME_STATE_WIN
         # eatman is able to eat ghosts
         eatman.lastSlayerTime = time.time()
         for ghost in ghosts:
-            if ghost.mode != Ghost.MODE_DYING:
+            if ghost.mode == Ghost.MODE_SCATTER or ghost.mode == Ghost.MODE_CHASE:
                 ghost.oldMode = ghost.mode
+                # make ghost freightened
                 ghost.mode = Ghost.MODE_FREIGHTEN
+                # reverse the direction
                 ghost.pathway = get_opposite_direction(ghost.direction)
 
     return gameState
+
+def draw_info_texts(level, eatman, ghosts):
+    theSurf, theRect = make_text_image(str(eatman.nbeans), BASICFONT, WHITE)
+    theRect.bottomright = (WINDOW_WIDTH-10, 45)
+    DISPLAYSURF.blit(theSurf, theRect)
 
 
 def make_text_image(text, font, color):
@@ -1135,10 +1238,10 @@ def main():
     resource.load_sounds()
     resource.load_sprites()
 
-    idx_level = 0
+    iLevel = 0 if len(sys.argv)==1 else int(sys.argv[1])
     show_title_screen()
     while True: # game loop
-        run_game(idx_level)
+        run_game(iLevel)
         if gameState == GAME_STATE_DEAD:
             show_lose_screen()
         elif gameState == GAME_STATE_WIN:
@@ -1146,9 +1249,9 @@ def main():
             # advance level here?
 
 
-def run_game(idx_level):
+def run_game(iLevel):
 
-    global gameState, DISPLAYSURF
+    global gameState, DISPLAYSURF, WINDOW_WIDTH, WINDOW_HEIGHT
 
     # Reset game status and reset the screen to black to start
     gameState = GAME_STATE_NORMAL
@@ -1158,11 +1261,18 @@ def run_game(idx_level):
 
     # Load the level file
     level = Level()
-    level.load(idx_level)
+    level.load(iLevel)
+
+    # Resize the window according to the maze size
+    WINDOW_WIDTH = level.ncols*TILE_WIDTH
+    WINDOW_HEIGHT = (level.nrows+5)*TILE_HEIGHT
+    pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+
     # recolor the tiles according to the level requirement
     resource.recolor_tiles(level)
     # analyze the data to assign tiles
     level.analyze_data(DISPLAYSURF)
+
 
     # The EatMan
     eatman = Eatman(level)
@@ -1287,10 +1397,13 @@ def run_game(idx_level):
                 loopit = False
         else:
             eatman.draw(DISPLAYSURF)
+
+        # Draw texts
+        draw_info_texts(level, eatman, ghosts)
         
         # Win?
         if gameState == GAME_STATE_WIN:
-            time.sleep(2)
+            time.sleep(1)
             loopit = False
     
         # Update the actual screen image
