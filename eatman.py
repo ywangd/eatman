@@ -68,6 +68,12 @@ WHITE                   = (248, 248, 248, 255)
 BLACK                   = (  0,   0,   0, 255)
 YELLOW                  = (255, 255,   0, 255)
 
+SLOW = 'snow'
+FREEZE = 'ice'
+SPEED = 'boots'
+BOMB = 'bomb'
+BUFFS_ALL = [SLOW, FREEZE, SPEED, BOMB]
+
 class Config(object):
     '''
     The class to store informations about the game configurations.
@@ -120,6 +126,8 @@ class Resource(object):
         self.ghost_freighten = {}
         self.ghost_recover = {}
         self.glasses = {}
+        self.buffs = {}
+        self.exploding = {}
 
         files = os.listdir(os.path.join(SRCDIR,'sprites'))
         for filename in files:
@@ -148,6 +156,14 @@ class Resource(object):
 
             if filename == 'glasses.gif':
                 self.glasses['glasses'] = pygame.image.load(
+                        os.path.join(SRCDIR,'sprites',filename)).convert()
+
+            if filename[0:-4] in BUFFS_ALL:
+                self.buffs[filename[0:-4]] = pygame.image.load(
+                        os.path.join(SRCDIR,'sprites',filename)).convert()
+
+            if filename[0:-6] == 'exploding':
+                self.exploding[filename[0:-4]] = pygame.image.load(
                         os.path.join(SRCDIR,'sprites',filename)).convert()
 
 
@@ -204,6 +220,9 @@ class Level(object):
 
         self.nghosts = 0
         self.ghost_params = {}
+
+        self.buffs = copy.copy(BUFFS_ALL)
+        random.shuffle(self.buffs)
 
     def load(self, iLevel):
         self.iLevel = iLevel
@@ -300,8 +319,26 @@ class Level(object):
         theSurf, theRect = make_text_image('score', BASICFONT, WHITE)
         theRect.bottomright = (WINDOW_WIDTH-10, 21)
         self.mazeSurf.blit(theSurf, theRect)
-
         
+        # The energy bar
+        quarter_width = int(WINDOW_WIDTH/4.0)
+        rect = [quarter_width, WINDOW_HEIGHT - 2*TILE_HEIGHT, quarter_width*2, TILE_HEIGHT]
+        pygame.draw.rect(self.mazeSurf, BLUE, rect)
+        rect[0] += 3
+        rect[1] += 3
+        rect[2] -= 6
+        rect[3] -= 6
+        self.rect_energy = rect
+        pygame.draw.rect(self.mazeSurf, BLACK, rect)
+        
+        self.energyLevel = [0]
+        self.energyLevel.append(int(self.nbeans/3))
+        self.energyLevel.append(int(self.nbeans/1.2))
+        self.energyLevel.append(self.nbeans*2)
+        self.idx_energyLevel = 1
+
+        self.energy_decay_time = 2.0
+
 
 
     def analyze_tile(self, ix, iy):
@@ -458,7 +495,6 @@ class Fire(object):
             return False
 
 
-
 class Ghost(object):
 
     # The pupil locations
@@ -477,6 +513,7 @@ class Ghost(object):
     MODE_DEAD      = 2
     MODE_DYING     = 3
     MODE_FREIGHTEN = 4
+    MODE_EXPLODING = 5
 
     # Target picking strategy
     TPS_WHIMSICAL = 0
@@ -494,6 +531,7 @@ class Ghost(object):
         self.id = idx
         self.motion = Ghost.MOTION_IDLE
         self.animFreq = config.get('Ghost','fanimatefrequency')
+        self.freq_modifier = {}
         self.speed = config.get('Ghost','ispeed')
         self.pathway = ''
 
@@ -504,10 +542,12 @@ class Ghost(object):
         self.lastMaTime = time.time() # last mode alternation time
 
         self.mode_duration_base = {}
+
         self.mode_duration_base[Ghost.MODE_SCATTER] = 6 - level.iLevel*0.5
         if self.mode_duration_base[Ghost.MODE_SCATTER] < 0:
             self.mode_duration_base[Ghost.MODE_SCATTER] = 0.02
-        self.mode_duration_base[Ghost.MODE_CHASE] = 15 + level.iLevel*0.5
+
+        self.mode_duration_base[Ghost.MODE_CHASE] = 15 + level.iLevel
         self.mode_duration = self.generate_mode_duration()
 
         self.lastDeadTime = time.time()
@@ -516,7 +556,7 @@ class Ghost(object):
         self.xypos = uv_to_xy(level.ghost_params[idx]['uvpos'])
         self.uvpos_target = [0, 0]
         # The ghost reset position is always the first ghost's starting position
-        self.uvpos_dyingto = level.ghost_params[0]['uvpos'] 
+        self.uvpos_dyingto = [level.uvpos_ghostdoor[0], level.uvpos_ghostdoor[1]+1]
 
         self.pupil_color = BLACK
         self.pupil_pos = random.choice(
@@ -591,12 +631,10 @@ class Ghost(object):
 
         # chilling rate, time started, duration
         if level.ghost_params[idx].has_key('chilling'):
-            eatman.animFreq_factors['ghost-'+str(idx)] = (level.ghost_params[idx]['chilling'], \
-                    time.time(), -1)
+            eatman.add_freq_modifier(level.ghost_params[idx]['chilling'], 1e20)
 
         # Load the images
         self.load_sprites()
-
 
     def load_sprites(self):
         frame_sequence = [1,2,3,4,5,4,3,2,1]
@@ -620,16 +658,15 @@ class Ghost(object):
 
     def generate_mode_duration(self):
 
-        radius = self.mode_duration_base[self.mode] / 3.0
-        # modify the duration by the number of alternation time
         if self.mode == Ghost.MODE_SCATTER:
-            lbound = -radius - self.nalters*0.5
-            ubound = radius - self.nalters*0.5
+            adjustment = -self.nalters
         elif self.mode == Ghost.MODE_CHASE:
-            lbound = -radius + self.nalters*0.5
-            ubound = radius + self.nalters*0.5
+            if self.nalters >3:
+                adjustment = 99999
+            else:
+                adjustment = self.nalters*2
 
-        mode_duration = self.mode_duration_base[self.mode] + random.uniform(-radius, radius)
+        mode_duration = self.mode_duration_base[self.mode] + adjustment
         if mode_duration < 0:
             mode_duration = 0.02
 
@@ -676,6 +713,14 @@ class Ghost(object):
 
         return False
 
+    # all modifier will be used in multiplications
+    def add_freq_modifier(self, value, duration):
+        if self.mode != Ghost.MODE_DEAD and self.mode != Ghost.MODE_DYING:
+            stime = time.time()
+            name = str(random.random()) + str(stime)
+            self.freq_modifier[name] = (value, stime, duration)
+            return name
+        return None
 
     def draw(self, DISPLAYSURF, eatman):
 
@@ -744,11 +789,23 @@ class Ghost(object):
 
         # Calculate its animation frequency
         animFreq = self.animFreq
-        # Make ghost move slower when its freightened
-        if self.mode == Ghost.MODE_FREIGHTEN:
-            animFreq *= 3.0
-        elif self.mode == Ghost.MODE_DYING: # Make ghost move faster when dying
-            animFreq /= 4.0
+
+        # Make ghost move faster when dying, no other frequency factor should be used
+        if self.mode == Ghost.MODE_DYING: 
+            animFreq *= 0.25
+
+        else:
+            # Make ghost move slower when its freightened
+            if self.mode == Ghost.MODE_FREIGHTEN:
+                animFreq *= 3.0
+
+            # Modify the animate frequency through the modifiers
+            for key in self.freq_modifier.keys():
+                value, stime, duration = self.freq_modifier[key]
+                if duration < 0 or time.time()-stime < duration:
+                    animFreq *= value
+                else:
+                    del self.freq_modifier[key]
 
         # If it is in middle of an animation and its time to refresh a new frame 
         # keep doing it till the cycle is done.
@@ -818,12 +875,14 @@ class Ghost(object):
 
                 elif self.mode == Ghost.MODE_CHASE:
                     # generate a path based on the ghost's target picking strategy
+                    # whimsical tries to help the pursuer
                     if self.tps == Ghost.TPS_WHIMSICAL:
                         e_uvpos = xy_to_uv(eatman.xypos)
                         g_uvpos = xy_to_uv(Ghost.pursuer.xypos)
                         euvpos = [g_uvpos[0] + 2*(e_uvpos[0] - g_uvpos[0]), 
                                 g_uvpos[1] + 2*(e_uvpos[1] - g_uvpos[1])]
 
+                    # Ambuser tries to get ahead of the eatman
                     elif self.tps == Ghost.TPS_AMBUSHER:
                         euvpos = xy_to_uv(eatman.xypos)
                         if eatman.direction == UP:
@@ -835,6 +894,7 @@ class Ghost(object):
                         elif eatman.direction == RIGHT:
                             euvpos[0] += 4
 
+                    # ignorance will chase if too far but leave if too close
                     elif self.tps == Ghost.TPS_IGNORANCE:
                         e_uvpos = xy_to_uv(eatman.xypos)
                         g_uvpos = xy_to_uv(self.xypos)
@@ -889,7 +949,7 @@ class Eatman(object):
         self.animFreq = config.get('Eatman', 'fanimatefrequency')
         self.speed = config.get('Eatman','ispeed')
 
-        self.animFreq_factors = {}
+        self.freq_modifier = {}
 
         self.load_sprites()
         self.idx_frame      = 0
@@ -897,7 +957,10 @@ class Eatman(object):
 
         self.lastSlayerTime = time.time()
 
-        self.nbeans = 0
+        self.score = 0
+        self.energy = 0
+
+        self.lastEatTime = time.time()
 
 
     def load_sprites(self):
@@ -927,17 +990,24 @@ class Eatman(object):
         self.frames_dead[-1].fill(BACKGROUND_COLOR)
 
 
+    # all modifier will be used in multiplications
+    def add_freq_modifier(self, value, duration):
+        stime = time.time()
+        name = str(random.random()) + str(stime)
+        self.freq_modifier[name] = (value, stime, duration)
+        return name
+
 
     def make_move(self):
 
         # modify the animation frequency by any buff/debuff
         animFreq = self.animFreq
-        for key in self.animFreq_factors:
-            vals = self.animFreq_factors[key]
-            if vals[2] < 0 or time.time()-vals[1]<vals[2]:
-                animFreq *= vals[0]
+        for key in self.freq_modifier.keys():
+            value, stime, duration = self.freq_modifier[key]
+            if duration < 0 or time.time()-stime < duration:
+                animFreq *= value
             else:
-                del(self.animFreq_factors[key])
+                del self.freq_modifier[key]
 
         # Only animate the player if it is in animate state and with proper frequency
         if self.motion == Eatman.MOTION_ANIMATE and time.time()-self.lastAnimTime>animFreq:
@@ -985,6 +1055,26 @@ class Bean(object):
     def __init__(self, uvpos, image):
         self.uvpos = uvpos
         self.image = image
+
+def apply_buff(buff, eatman, ghosts, fires):
+
+    if buff == SLOW:
+        for ghost in ghosts:
+            ghost.add_freq_modifier(5.0, 4.0) # slow 5 times for 4 seconds
+    elif buff == FREEZE:
+        for ghost in ghosts:
+            ghost.add_freq_modifier(99999.9, 4.0) # slow 99999.9 times for 4 seconds
+    elif buff == BOMB:
+        ghost_to_die = []
+        for ghost in ghosts:
+            if ghost.mode != Ghost.MODE_DYING or ghost.mode != Ghost.MODE_DEAD:
+                ghost_to_die.append(ghost)
+        if len(ghost_to_die) > 0:
+            ghost_to_die = random.choice(ghost_to_die)
+            ghost_to_die.mode = ghost.MODE_DYING
+    elif buff == SPEED:
+        eatman.add_freq_modifier(0.3333, 5.0)
+
 
 
 def randpath(level, ghost):
@@ -1103,16 +1193,24 @@ def check_hit(level, eatman, ghosts, fires):
 
     u, v = xy_to_uv(eatman.xypos)
 
+    # hit a ghost?
     for ghost in ghosts:
         if [u, v] == xy_to_uv(ghost.xypos):
             if ghost.mode == Ghost.MODE_FREIGHTEN:
+                # eat a ghost
                 ghost.mode = ghost.MODE_DYING
+                eatman.lastEatTime = time.time()
+                eatman.score += 100
+
             elif ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
                 pass
+
             else:
+                # killed by a ghost
                 eatman.idx_frame = 0
                 return GAME_STATE_DYING
 
+    # hit a fire?
     for fire in fires:
         if fire.uvpos == [u, v]:
             eatman.idx_frame = 0
@@ -1123,11 +1221,19 @@ def check_hit(level, eatman, ghosts, fires):
         level.data[v][u] = L_EMPTY
         del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
-        eatman.nbeans += 1
+        eatman.score += 1
+        eatman.energy += 1
+        eatman.lastEatTime = time.time()
         resource.sounds['bean-'+str(level.idx_beansound)].play()
         level.idx_beansound += 1
         if level.idx_beansound >=2:
             level.idx_beansound = 0
+        # check if energy is full
+        if eatman.energy > level.energyLevel[level.idx_energyLevel]:
+            buff = level.buffs[level.idx_energyLevel-1]
+            apply_buff(buff, eatman, ghosts, fires)
+            level.idx_energyLevel += 1
+        # win if beans all consumed
         if level.nbeans == 0:
             return GAME_STATE_WIN
 
@@ -1136,11 +1242,11 @@ def check_hit(level, eatman, ghosts, fires):
         level.data[v][u] = L_EMPTY
         del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
-        eatman.nbeans += 1
+        eatman.score += 10
+        eatman.energy += 1
+        eatman.lastEatTime = time.time()
         resource.sounds['bean-big'].play()
-        if level.nbeans == 0:
-            return GAME_STATE_WIN
-        # eatman is able to eat ghosts
+        # eatman is now able to eat ghosts
         eatman.lastSlayerTime = time.time()
         for ghost in ghosts:
             if ghost.mode == Ghost.MODE_SCATTER or ghost.mode == Ghost.MODE_CHASE:
@@ -1149,20 +1255,46 @@ def check_hit(level, eatman, ghosts, fires):
                 ghost.mode = Ghost.MODE_FREIGHTEN
                 # reverse the direction
                 ghost.pathway = get_opposite_direction(ghost.direction)
+        # check if energy is full
+        if eatman.energy > level.energyLevel[level.idx_energyLevel]:
+            buff = level.buffs[level.idx_energyLevel-1]
+            apply_buff(buff, eatman, ghosts, fires)
+            level.idx_energyLevel += 1
+        # win if beans all consumed
+        if level.nbeans == 0:
+            return GAME_STATE_WIN
+
+    # Do we need decay the energy
+    if time.time() - eatman.lastEatTime > level.energy_decay_time:
+        eatman.energy -= 1
+        eatman.lastEatTime = time.time()
+        if eatman.energy < level.energyLevel[level.idx_energyLevel-1]:
+            eatman.energy = level.energyLevel[level.idx_energyLevel-1]
 
     return gameState
 
-def draw_info_texts(level, eatman, ghosts):
-    theSurf, theRect = make_text_image(str(eatman.nbeans), BASICFONT, WHITE)
+
+def draw_game_stats(level, eatman, ghosts):
+
+    theSurf, theRect = make_text_image(str(eatman.score), BASICFONT, WHITE)
     theRect.bottomright = (WINDOW_WIDTH-10, 45)
     DISPLAYSURF.blit(theSurf, theRect)
+
+    energy = eatman.energy - level.energyLevel[level.idx_energyLevel-1] 
+    percent = energy*1.0/(level.energyLevel[level.idx_energyLevel] 
+            - level.energyLevel[level.idx_energyLevel-1])
+    rect = copy.copy(level.rect_energy)
+    DISPLAYSURF.blit(resource.buffs[level.buffs[level.idx_energyLevel-1]], 
+            [rect[0]+rect[2]+10, rect[1]])
+    rect[2] = int(level.rect_energy[2]*percent)
+    pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
 
 
 def make_text_image(text, font, color):
     surf = font.render(text, True, color)
     return surf, surf.get_rect()
 
-def show_text_screen(text):
+def show_text_screen(text, color=WHITE):
     # This function displays large text in the
     # center of the screen until a key is pressed.
     # Draw the text drop shadow
@@ -1171,7 +1303,7 @@ def show_text_screen(text):
     DISPLAYSURF.blit(titleSurf, titleRect)
 
     # Draw the text
-    titleSurf, titleRect = make_text_image(text, BIGFONT, WHITE)
+    titleSurf, titleRect = make_text_image(text, BIGFONT, color)
     titleRect.center = (int(WINDOW_WIDTH / 2) - 3, int(WINDOW_HEIGHT / 2) - 3)
     DISPLAYSURF.blit(titleSurf, titleRect)
 
@@ -1182,6 +1314,8 @@ def show_text_screen(text):
 
     while check_for_key_press() == None:
         pygame.display.update()
+
+    CLOCK_FPS.tick(FPS)
 
 
 def check_for_quit():
@@ -1212,7 +1346,7 @@ def show_pause_screen():
     show_text_screen('PAUSE')
 
 def show_title_screen():
-    show_text_screen('EatMan')
+    show_text_screen('EatMan', color=YELLOW)
 
 def show_lose_screen():
     show_text_screen('Lose')
@@ -1223,10 +1357,10 @@ def show_win_screen():
 
 def main():
 
-    global gameState, DISPLAYSURF, BASICFONT, BIGFONT
+    global gameState, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS
 
     pygame.init()
-    #clock_fps = pygame.time.Clock()
+    CLOCK_FPS = pygame.time.Clock()
     DISPLAYSURF = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     BASICFONT = pygame.font.Font('freesansbold.ttf', 18)
     BIGFONT = pygame.font.Font('freesansbold.ttf', 100)
@@ -1327,15 +1461,28 @@ def run_game(iLevel):
                     moveDown = False
 
                 elif event.key == K_ESCAPE:
-                    pauseSTime = time.time()
+                    pause_stime = time.time()
                     show_pause_screen()
-                    pauseDruation = time.time()-pauseSTime
+                    pause_duration = time.time()-pause_stime
                     # re-calculate important timers
-                    eatman.lastSlayerTime += pauseDruation
-                    for fire in fires:
-                        fire.stime += pauseDruation
+                    # eatman
+                    eatman.lastSlayerTime += pause_duration
+                    eatman.lastEatTime += pause_duration
+                    for key in eatman.freq_modifier:
+                            value, stime, duration = eatman.freq_modifier[key]
+                            stime += pause_duration
+                            eatman.freq_modifier[key] = (value, stime, duration)
+                    # ghosts
                     for ghost in ghosts:
-                        ghost.lastMaTime += pauseDruation
+                        ghost.lastMaTime += pause_duration
+                        for key in ghost.freq_modifier:
+                            value, stime, duration = ghost.freq_modifier[key]
+                            stime += pause_duration
+                            ghost.freq_modifier[key] = (value, stime, duration)
+                    # objects
+                    for fire in fires:
+                        fire.stime += pause_duration
+
 
         # Always change the facing direction when eatman is idle.
         # But only animate it if there is valid space to move.
@@ -1398,8 +1545,8 @@ def run_game(iLevel):
         else:
             eatman.draw(DISPLAYSURF)
 
-        # Draw texts
-        draw_info_texts(level, eatman, ghosts)
+        # Draw game state infos
+        draw_game_stats(level, eatman, ghosts)
         
         # Win?
         if gameState == GAME_STATE_WIN:
@@ -1409,7 +1556,7 @@ def run_game(iLevel):
         # Update the actual screen image
         pygame.display.update()
 
-        #clock_fps.tick(FPS)
+        #CLOCK_FPS.tick(FPS)
 
 
 if __name__ == '__main__':
