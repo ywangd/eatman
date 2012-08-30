@@ -202,6 +202,7 @@ class Resource(object):
 
 config = Config() # Read the config.ini file
 resource = Resource()
+score = 0
 
 #################################################################################
 
@@ -226,7 +227,8 @@ class Level(object):
 
     def load(self, iLevel):
         self.iLevel = iLevel
-        infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
+        #infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
+        infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
         self.data = []
         for line in infile.readlines():
             line = line.strip()
@@ -316,10 +318,21 @@ class Level(object):
                     self.dynamicObjects[uv_to_key([u, v])] = Bean([u, v], img)
 
         # draw other static objects
+        # level
+        theSurf, theRect = make_text_image('level', BASICFONT, WHITE)
+        theRect.center = (WINDOW_WIDTH/2, 12)
+        self.mazeSurf.blit(theSurf, theRect)
+        
+        # score
         theSurf, theRect = make_text_image('score', BASICFONT, WHITE)
         theRect.bottomright = (WINDOW_WIDTH-10, 21)
         self.mazeSurf.blit(theSurf, theRect)
-        
+
+        # high score
+        theSurf, theRect = make_text_image('HI score', BASICFONT, WHITE)
+        theRect.topleft = (10, 2)
+        self.mazeSurf.blit(theSurf, theRect)
+
         # The energy bar
         quarter_width = int(WINDOW_WIDTH/4.0)
         rect = [quarter_width, WINDOW_HEIGHT - 2*TILE_HEIGHT, quarter_width*2, TILE_HEIGHT]
@@ -737,7 +750,7 @@ class Ghost(object):
             idx_frame = self.idx_frame % len(resource.ghost_freighten) + 1
             img = resource.ghost_freighten['ghost-freighten-'+str(idx_frame)]
             # Flash the ghost when the freighten timer has 1.5 seconds left
-            if time.time()-eatman.lastSlayerTime > config.get('Eatman','finvincibleduration')-1.5:
+            if time.time()-eatman.lastSlayerTime > config.get('Eatman','fslayerduration')-1.5:
                 if idx_frame % 2 == 0:
                     img = resource.ghost_recover['ghost-freighten-'+str(idx_frame)]
 
@@ -782,7 +795,7 @@ class Ghost(object):
         # If the ghost is in freightened mode
         if self.mode == Ghost.MODE_FREIGHTEN:
             # check if the mode expires
-            if time.time()-eatman.lastSlayerTime > config.get('Eatman','finvincibleduration'):
+            if time.time()-eatman.lastSlayerTime > config.get('Eatman','fslayerduration'):
                 self.mode = self.oldMode # restore the old mode before the freightened mode
                 self.lastMaTime += time.time() - eatman.lastSlayerTime # re-calculate timers
                 # now ready to make moves
@@ -957,7 +970,6 @@ class Eatman(object):
 
         self.lastSlayerTime = time.time()
 
-        self.score = 0
         self.energy = 0
 
         self.lastEatTime = time.time()
@@ -1191,6 +1203,8 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
 
 def check_hit(level, eatman, ghosts, fires):
 
+    global score 
+
     u, v = xy_to_uv(eatman.xypos)
 
     # hit a ghost?
@@ -1200,7 +1214,7 @@ def check_hit(level, eatman, ghosts, fires):
                 # eat a ghost
                 ghost.mode = ghost.MODE_DYING
                 eatman.lastEatTime = time.time()
-                eatman.score += 100
+                score += 100
 
             elif ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
                 pass
@@ -1221,7 +1235,7 @@ def check_hit(level, eatman, ghosts, fires):
         level.data[v][u] = L_EMPTY
         del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
-        eatman.score += 1
+        score += 1
         eatman.energy += 1
         eatman.lastEatTime = time.time()
         resource.sounds['bean-'+str(level.idx_beansound)].play()
@@ -1242,7 +1256,7 @@ def check_hit(level, eatman, ghosts, fires):
         level.data[v][u] = L_EMPTY
         del level.dynamicObjects[uv_to_key([u, v])]
         level.nbeans -= 1
-        eatman.score += 10
+        score += 10
         eatman.energy += 1
         eatman.lastEatTime = time.time()
         resource.sounds['bean-big'].play()
@@ -1276,16 +1290,25 @@ def check_hit(level, eatman, ghosts, fires):
 
 def draw_game_stats(level, eatman, ghosts):
 
-    theSurf, theRect = make_text_image(str(eatman.score), BASICFONT, WHITE)
+    global score
+
+    # the level
+    theSurf, theRect = make_text_image(str(level.iLevel), BASICFONT, WHITE)
+    theRect.center = (WINDOW_WIDTH/2, 35)
+    DISPLAYSURF.blit(theSurf, theRect)
+
+    # the score
+    theSurf, theRect = make_text_image(str(score), BASICFONT, WHITE)
     theRect.bottomright = (WINDOW_WIDTH-10, 45)
     DISPLAYSURF.blit(theSurf, theRect)
 
+    # the energy bar
     energy = eatman.energy - level.energyLevel[level.idx_energyLevel-1] 
     percent = energy*1.0/(level.energyLevel[level.idx_energyLevel] 
             - level.energyLevel[level.idx_energyLevel-1])
     rect = copy.copy(level.rect_energy)
     DISPLAYSURF.blit(resource.buffs[level.buffs[level.idx_energyLevel-1]], 
-            [rect[0]+rect[2]+10, rect[1]])
+            [rect[0]+rect[2]+10, rect[1]-2])
     rect[2] = int(level.rect_energy[2]*percent)
     pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
 
@@ -1357,7 +1380,7 @@ def show_win_screen():
 
 def main():
 
-    global gameState, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS
+    global gameState, score, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS
 
     pygame.init()
     CLOCK_FPS = pygame.time.Clock()
@@ -1378,8 +1401,10 @@ def main():
         run_game(iLevel)
         if gameState == GAME_STATE_DEAD:
             show_lose_screen()
+            score = 0
         elif gameState == GAME_STATE_WIN:
             show_win_screen()
+            iLevel += 1
             # advance level here?
 
 
