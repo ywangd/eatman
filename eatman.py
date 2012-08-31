@@ -5,7 +5,7 @@ import pygame
 from pygame.locals import *
 import pprint
 
-SRCDIR                  = os.path.abspath(os.path.dirname(sys.argv[0]))
+SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
 
 FPS                     = 60
 
@@ -203,6 +203,7 @@ class Resource(object):
 config = Config() # Read the config.ini file
 resource = Resource()
 score = 0
+BASICFONT = None
 
 #################################################################################
 
@@ -274,6 +275,21 @@ class Level(object):
         self.ncols = len(self.data[0])
         for line in self.data:
             assert len(line) == self.ncols
+
+
+    def set_data(self, data):
+        self.data = []
+        for onerow in data:
+            self.data.append(list(onerow.replace(L_EMPTY, L_BEAN)))
+        self.nrows = len(self.data)
+        self.ncols = len(self.data[0])
+        for line in self.data:
+            assert len(line) == self.ncols
+
+        self.ghost_params[0] = {}
+        self.ghost_params[1] = {}
+        self.ghost_params[2] = {}
+        self.ghost_params[3] = {}
 
 
     def analyze_data(self, DISPLAYSURF):
@@ -1565,7 +1581,7 @@ def run_game(iLevel):
         if gameState == GAME_STATE_DYING:
             gameState = eatman.animate_dead(DISPLAYSURF)
             if gameState == GAME_STATE_DEAD:
-                time.sleep(1)
+                time.sleep(0.5)
                 loopit = False
         else:
             eatman.draw(DISPLAYSURF)
@@ -1575,7 +1591,6 @@ def run_game(iLevel):
         
         # Win?
         if gameState == GAME_STATE_WIN:
-            time.sleep(1)
             loopit = False
     
         # Update the actual screen image
