@@ -12,7 +12,25 @@ A Pac-Man clone with improved game mechanics.
 ywangd@gmail.com
 '''
 
-SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
+
+def we_are_frozen():
+    """Returns whether we are frozen via py2exe.
+    This will affect how we find out where we are located."""
+
+    return hasattr(sys, "frozen")
+
+
+def module_path():
+    """ This will get us the program's directory,
+    even if we are frozen using py2exe"""
+
+    if we_are_frozen():
+        return os.path.dirname(sys.executable)
+
+    return os.path.dirname(__file__)
+
+#SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
+SRCDIR                  = module_path()
 
 FPS                     = 60
 
@@ -1449,8 +1467,12 @@ def main():
     pygame.init()
     CLOCK_FPS = pygame.time.Clock()
     DISPLAYSURF = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+
     BASICFONT = pygame.font.Font('freesansbold.ttf', 18)
+    #BASICFONT = pygame.font.SysFont(None, 18)
     BIGFONT = pygame.font.Font('freesansbold.ttf', 100)
+    #BIGFONT = pygame.font.SysFont(None, 100)
+
     pygame.display.set_caption('EatMan')
     pygame.display.set_icon(
             pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-icon.png')).convert())
