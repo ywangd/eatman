@@ -26,6 +26,7 @@ GAME_STATE_NORMAL       = 0
 GAME_STATE_WIN          = 1
 GAME_STATE_DYING        = 2
 GAME_STATE_DEAD         = 3
+GAME_STATE_RESTART      = 4
 
 STATIC                  = 's'
 UP                      = 'u'
@@ -203,6 +204,7 @@ class Resource(object):
 
 config = Config() # Read the config.ini file
 resource = Resource()
+hiscore = 0
 score = 0
 BASICFONT = None
 
@@ -223,17 +225,25 @@ class Level(object):
 
         self.nghosts = 0
         self.ghost_params = {}
-        self.ghost_params[0] = {}
-        self.ghost_params[1] = {}
-        self.ghost_params[2] = {}
-        self.ghost_params[3] = {}
+        for ii in range(4):
+            self.ghost_params[ii] = {}
 
         self.buffs = copy.copy(BUFFS_ALL)
         random.shuffle(self.buffs)
 
     def load(self, iLevel):
         self.iLevel = iLevel
-        self.data = []
+
+        for ii in range(4):
+            fastratio = 0.7 + iLevel*(1.0/20.0)*0.5
+            if fastratio > 1.2:
+                fastratio = 1.2
+            self.ghost_params[ii]['fast'] = fastratio
+            if ii==2:
+                moltenratio = iLevel*5
+                if moltenratio >= 50:
+                    moltenratio = 50
+                self.ghost_params[ii]['molten'] = moltenratio
 
         filename = os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat') 
         if os.path.exists(filename):
@@ -241,9 +251,16 @@ class Level(object):
             #infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
             data = infile.readlines()
         else:
-            data = genmaze.genmaze(21, 21, 0.20)
+            path_fill_ratio = random.uniform(0.18, 0.25)
+            nrows = 21 + (iLevel/4)*4
+            if nrows > 29:
+                nrows = 29
+            ncols = 21 + (iLevel/4)*4
+            if ncols > 33:
+                ncols = 33
+            data = genmaze.genmaze(nrows, ncols, path_fill_ratio)
 
-
+        self.data = []
         for line in data:
             line = line.strip()
             if line != '':
@@ -361,6 +378,15 @@ class Level(object):
         theSurf, theRect = make_text_image('HI score', BASICFONT, WHITE)
         theRect.topleft = (10, 2)
         self.mazeSurf.blit(theSurf, theRect)
+        global hiscore
+        try:
+            hiscore = int(open(os.path.join(SRCDIR,'hiscore.txt')).readline())
+        except ValueError:
+            hiscore = 0
+        theSurf, theRect = make_text_image(str(hiscore), BASICFONT, WHITE)
+        theRect.topleft = (10, 26)
+        self.mazeSurf.blit(theSurf, theRect)
+
 
         # The energy bar
         quarter_width = int(WINDOW_WIDTH/4.0)
@@ -1406,6 +1432,9 @@ def show_lose_screen():
 def show_win_screen():
     show_text_screen('Win')
 
+def save_hiscore(score):
+    outs = open(os.path.join(SRCDIR,'hiscore.txt'),'w')
+    outs.write(str(score)+'\n')
 
 def main():
 
@@ -1430,13 +1459,16 @@ def main():
     while True: # game loop
         run_game(iLevel)
         if gameState == GAME_STATE_DEAD:
+            if score > hiscore:
+                save_hiscore(score)
             show_lose_screen()
             score = 0
             iLevel = iLevel_start
         elif gameState == GAME_STATE_WIN:
+            if score > hiscore:
+                save_hiscore(score)
             show_win_screen()
             iLevel += 1
-            # advance level here?
 
 
 def run_game(iLevel):
@@ -1516,8 +1548,11 @@ def run_game(iLevel):
                 elif event.key == K_DOWN:
                     moveDown = False
 
-                elif event.key == 110:
+                elif event.key == K_n:
                     gameState = GAME_STATE_WIN
+
+                elif event.key == K_r:
+                    gameState = GAME_STATE_RESTART
 
                 elif event.key == K_ESCAPE:
                     pause_stime = time.time()
@@ -1609,6 +1644,10 @@ def run_game(iLevel):
         
         # Win?
         if gameState == GAME_STATE_WIN:
+            loopit = False
+
+        # restart
+        if gameState == GAME_STATE_RESTART:
             loopit = False
     
         # Update the actual screen image
