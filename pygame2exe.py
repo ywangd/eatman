@@ -65,7 +65,7 @@ class BuildExe:
         self.project_description = "A Pac-Man clone with some improved mechanics."
  
         #Icon file (None will use pygame default icon)
-        self.icon_file = 'eatman-icon.ico'
+        self.icon_file = 'pyc.ico'
  
         #Extra files/dirs copied to game
         self.extra_datas = ['levels','sounds','sprites','tiles','config.ini','hiscore.txt','freesansbold.ttf']
@@ -77,7 +77,7 @@ class BuildExe:
         #DLL Excludes
         self.exclude_dll = ['']
         #python scripts (strings) to be included, seperated by a comma
-        self.extra_scripts = ['genmaze']
+        self.extra_scripts = []
  
         #Zip file name (None will bundle files in exe instead of zip file)
         self.zipfile_name = None

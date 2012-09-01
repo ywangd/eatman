@@ -1164,7 +1164,7 @@ def apply_buff(buff, eatman, ghosts, fires):
             ghost_to_die = random.choice(ghost_to_die)
             ghost_to_die.mode = ghost.MODE_DYING
     elif buff == SPEED:
-        eatman.add_freq_modifier(0.3333, 5.0)
+        eatman.add_freq_modifier(0.50, 5.0) # twice faster for 5 seconds
 
 
 
