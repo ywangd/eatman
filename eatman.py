@@ -4,6 +4,7 @@ import ConfigParser
 import pygame
 from pygame.locals import *
 import pprint
+import genmaze
 
 SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
 
@@ -222,16 +223,28 @@ class Level(object):
 
         self.nghosts = 0
         self.ghost_params = {}
+        self.ghost_params[0] = {}
+        self.ghost_params[1] = {}
+        self.ghost_params[2] = {}
+        self.ghost_params[3] = {}
 
         self.buffs = copy.copy(BUFFS_ALL)
         random.shuffle(self.buffs)
 
     def load(self, iLevel):
         self.iLevel = iLevel
-        #infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
-        infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
         self.data = []
-        for line in infile.readlines():
+
+        filename = os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat') 
+        if os.path.exists(filename):
+            infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
+            #infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
+            data = infile.readlines()
+        else:
+            data = genmaze.genmaze(21, 21, 0.20)
+
+
+        for line in data:
             line = line.strip()
             if line != '':
                 fields = line.split(' ')
@@ -1412,12 +1425,14 @@ def main():
     resource.load_sprites()
 
     iLevel = 0 if len(sys.argv)==1 else int(sys.argv[1])
+    iLevel_start = iLevel
     show_title_screen()
     while True: # game loop
         run_game(iLevel)
         if gameState == GAME_STATE_DEAD:
             show_lose_screen()
             score = 0
+            iLevel = iLevel_start
         elif gameState == GAME_STATE_WIN:
             show_win_screen()
             iLevel += 1
@@ -1500,6 +1515,9 @@ def run_game(iLevel):
                     moveUp = False
                 elif event.key == K_DOWN:
                     moveDown = False
+
+                elif event.key == 110:
+                    gameState = GAME_STATE_WIN
 
                 elif event.key == K_ESCAPE:
                     pause_stime = time.time()
