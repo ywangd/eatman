@@ -251,7 +251,7 @@ class Level(object):
             #infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
             data = infile.readlines()
         else:
-            path_fill_ratio = random.uniform(0.18, 0.25)
+            path_fill_ratio = random.uniform(0.18, 0.30)
             nrows = 21 + (iLevel/4)*4
             if nrows > 29:
                 nrows = 29
