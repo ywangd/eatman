@@ -6,6 +6,12 @@ from pygame.locals import *
 import pprint
 import genmaze
 
+'''
+A Pac-Man clone with improved game mechanics.
+
+ywangd@gmail.com
+'''
+
 SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
 
 FPS                     = 60
@@ -251,7 +257,7 @@ class Level(object):
             #infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
             data = infile.readlines()
         else:
-            path_fill_ratio = random.uniform(0.18, 0.30)
+            path_fill_ratio = random.uniform(0.20, 0.30)
             nrows = 21 + (iLevel/4)*4
             if nrows > 29:
                 nrows = 29
@@ -1658,6 +1664,14 @@ def run_game(iLevel):
 
 if __name__ == '__main__':
 
-    main()
+    try:
+        main()
+    except Exception as inst:
+        outs = open(os.path.join(SRCDIR,'error.log'),'a+')
+        outs.write(time.ctime()+'\n')
+        outs.write(str(inst)+'\n')
+        outs.write('\n')
+        outs.close()
+        raise
 
 
