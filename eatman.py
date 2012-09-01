@@ -1453,7 +1453,7 @@ def main():
     resource.load_sounds()
     resource.load_sprites()
 
-    iLevel = 0 if len(sys.argv)==1 else int(sys.argv[1])
+    iLevel = 1 if len(sys.argv)==1 else int(sys.argv[1])
     iLevel_start = iLevel
     show_title_screen()
     while True: # game loop
