@@ -937,7 +937,7 @@ class Ghost(object):
         if self.motion == Ghost.MOTION_IDLE:
 
             # simply follow the pathway if it is not empty
-            if len(self.pathway) > 0:
+            if self.pathway is not None and len(self.pathway) > 0:
                 self.follow_pathway()
                 return
 
@@ -964,7 +964,7 @@ class Ghost(object):
                 # Try move out of the door only in idle motion and scatter or chase mode
                 self.move_outdoor(level) # this may give a new path too
 
-                if len(self.pathway) > 0:
+                if self.pathway is not None and len(self.pathway) > 0:
                     self.follow_pathway()
                     return
 
