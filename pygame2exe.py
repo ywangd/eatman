@@ -71,7 +71,7 @@ class BuildExe:
         self.extra_datas = ['levels','sounds','sprites','tiles','config.ini','hiscore.txt','freesansbold.ttf']
  
         #Extra/excludes python modules
-        self.extra_modules = []
+        self.extra_modules = ['numpy']
         self.exclude_modules = []
         
         #DLL Excludes

@@ -19,7 +19,6 @@ def we_are_frozen():
 
     return hasattr(sys, "frozen")
 
-
 def module_path():
     """ This will get us the program's directory,
     even if we are frozen using py2exe"""
@@ -29,10 +28,13 @@ def module_path():
 
     return os.path.dirname(__file__)
 
+
 #SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
+#SRCDIR = 'C:\\eatman'
 SRCDIR                  = module_path()
 
 FPS                     = 60
+FPS_LOW                 = 10
 
 WINDOW_WIDTH            = 504
 WINDOW_HEIGHT           = 609
@@ -94,11 +96,11 @@ WHITE                   = (248, 248, 248, 255)
 BLACK                   = (  0,   0,   0, 255)
 YELLOW                  = (255, 255,   0, 255)
 
-SLOW = 'snow'
-FREEZE = 'ice'
-SPEED = 'boots'
-BOMB = 'bomb'
-BUFFS_ALL = [SLOW, FREEZE, SPEED, BOMB]
+BUFF_SLOW               = 'snow'
+BUFF_FREEZE             = 'ice'
+BUFF_SPEED              = 'boots'
+BUFF_BOMB               = 'bomb'
+BUFFS_ALL               = [BUFF_SLOW, BUFF_FREEZE, BUFF_SPEED, BUFF_BOMB]
 
 class Config(object):
     '''
@@ -278,14 +280,14 @@ class Level(object):
         filename = os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat') 
         if os.path.exists(filename):
             infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
-            #infile = open(os.path.join(SRCDIR, 'levels', '0.dat'))
             data = infile.readlines()
         else:
             path_fill_ratio = random.uniform(0.20, 0.30)
-            nrows = 21 + (iLevel/4)*4
+            # dimension size, increase by 2 every 4 levels
+            nrows = 21 + (iLevel/4)*2
             if nrows > 29:
                 nrows = 29
-            ncols = 21 + (iLevel/4)*4
+            ncols = 21 + (iLevel/4)*2
             if ncols > 33:
                 ncols = 33
             data = genmaze.genmaze(nrows, ncols, path_fill_ratio)
@@ -1153,13 +1155,13 @@ class Bean(object):
 
 def apply_buff(buff, eatman, ghosts, fires):
 
-    if buff == SLOW:
+    if buff == BUFF_SLOW:
         for ghost in ghosts:
             ghost.add_freq_modifier(5.0, 4.0) # slow 5 times for 4 seconds
-    elif buff == FREEZE:
+    elif buff == BUFF_FREEZE:
         for ghost in ghosts:
             ghost.add_freq_modifier(99999.9, 4.0) # slow 99999.9 times for 4 seconds
-    elif buff == BOMB: # randomly blow up a ghost
+    elif buff == BUFF_BOMB: # randomly blow up a ghost
         ghost_to_die = []
         for ghost in ghosts:
             if ghost.mode != Ghost.MODE_DYING or ghost.mode != Ghost.MODE_DEAD:
@@ -1167,7 +1169,7 @@ def apply_buff(buff, eatman, ghosts, fires):
         if len(ghost_to_die) > 0:
             ghost_to_die = random.choice(ghost_to_die)
             ghost_to_die.mode = ghost.MODE_DYING
-    elif buff == SPEED:
+    elif buff == BUFF_SPEED:
         eatman.add_freq_modifier(0.50, 5.0) # twice faster for 5 seconds
 
 
@@ -1404,7 +1406,7 @@ def reset_after_lose(level, eatman, ghosts, fires):
         ghost.lastAnimTime = time.time()
         ghost.lastIndoorTime = time.time()
         for key in ghost.freq_modifier.keys():
-            value, stime, duration = self.freq_modifier[key]
+            value, stime, duration = ghost.freq_modifier[key]
             if duration > 0: # duration is positive means its a temporary buff
                 del ghost.freq_modifier[key]
 
@@ -1468,7 +1470,7 @@ def show_text_screen(text, color=WHITE):
     while check_for_key_press() == None:
         pygame.display.update()
 
-    CLOCK_FPS.tick(FPS)
+    CLOCK_FPS.tick(FPS_LOW)
 
 
 def check_for_quit():
@@ -1746,13 +1748,12 @@ def run_game(iLevel):
 
 if __name__ == '__main__':
 
+    import traceback
     try:
         main()
     except Exception as inst:
         outs = open(os.path.join(SRCDIR,'error.log'),'a+')
-        outs.write(time.ctime()+'\n')
-        outs.write(str(inst)+'\n')
-        outs.write('\n')
+        traceback.print_exc(file=outs)
         outs.close()
         raise
 

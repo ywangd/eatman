@@ -19,7 +19,7 @@ class Tile(object):
         self.links = []
 
 
-def format_maze(tiles, nrows, ncols):
+def format_maze(tiles, nrows, ncols, printit=False):
 
     # the big beans
     pos_bigbeans = [(3,1), (3,ncols-2), (nrows-4,1), (nrows-4,ncols-2)]
@@ -38,7 +38,8 @@ def format_maze(tiles, nrows, ncols):
         oneline = oneline.replace(TILE_WALL, TILE_FIXED_BARRIER)
         oneline = oneline.replace(TILE_BEAN, TILE_VACANCY)
         data.append(oneline)
-        #print oneline
+        if printit: 
+            print oneline
     return data
 
 
@@ -81,32 +82,60 @@ def get_possible_path(tiles, cell, cells_unvisited):
 
     return possible_path
 
-def is_possible_breakage(tiles, nrows, ncols, cell, cells_visited):
-    row, col = cell.pos
-    if row >= 3 and tiles[(row-2,col)] in cells_visited and tiles[(row-1,col)].symbol==TILE_WALL:
-        return True
-    if row <= nrows-4 and tiles[(row+2,col)] in cells_visited and tiles[(row+1,col)].symbol==TILE_WALL:
-        return True
-    if col >= 3 and tiles[(row,col-2)] in cells_visited and tiles[(row,col-1)].symbol==TILE_WALL:
-        return True
-    if col <= ncols-4 and tiles[(row,col+2)] in cells_visited and tiles[(row,col+1)].symbol==TILE_WALL:
-        return True
+def is_forming_blocky(tiles, cell, blocky_type):
+    # make sure we are not making blocky type 
+    row, col = cell.pos 
+    tile_l = tiles[row, col-1]
+    tile_r = tiles[row, col+1]
+    tile_u = tiles[row-1, col]
+    tile_d = tiles[row+1, col]
+    tile_ul = tiles[row-1, col-1]
+    tile_ur = tiles[row-1, col+1]
+    tile_ll = tiles[row+1, col-1]
+    tile_lr = tiles[row+1, col+1]
+    # upper left
+    if not(tile_u in blocky_type and tile_l in blocky_type and tile_ul in blocky_type) \
+            and not(tile_u in blocky_type and tile_r in blocky_type and tile_ur in blocky_type) \
+            and not(tile_d in blocky_type and tile_l in blocky_type and tile_ll in blocky_type) \
+            and not(tile_d in blocky_type and tile_r in blocky_type and tile_lr in blocky_type):
+        return False # no blocky is forming
 
-def break_the_wall(tiles, nrows, ncols, cell, cells_visited):
-    row, col = cell.pos
-    if row >= 3 and tiles[(row-2,col)] in cells_visited and tiles[(row-1,col)].symbol==TILE_WALL:
-        tiles[(row-1,col)].symbol = TILE_VACANCY
-        return True
-    if row <= nrows-4 and tiles[(row+2,col)] in cells_visited and tiles[(row+1,col)].symbol==TILE_WALL:
-        tiles[(row+1,col)].symbol = TILE_VACANCY
-        return True
-    if col >= 3 and tiles[(row,col-2)] in cells_visited and tiles[(row,col-1)].symbol==TILE_WALL:
-        tiles[(row,col-1)].symbol = TILE_VACANCY
-        return True
-    if col <= ncols-4 and tiles[(row,col+2)] in cells_visited and tiles[(row,col+1)].symbol==TILE_WALL:
-        tiles[(row,col+1)].symbol = TILE_VACANCY
-        return True
+    return True
 
+
+
+
+def find_possible_breakage(tiles, nrows, ncols, cell, cells_visited):
+    '''
+    Check whether the given cell is a possible position to make a breakage around it.
+    '''
+    row, col = cell.pos
+    passable_cells = [TILE_BEAN, TILE_VACANCY, TILE_FIXED_PATH, TILE_EATMAN]
+
+    # UP 
+    # Make sure the cell to break is a wall and the breakage is going to a visited space
+    if row >= 3 and tiles[(row-2,col)] in cells_visited and tiles[(row-1,col)].symbol==TILE_WALL:
+        if is_forming_blocky(tiles, tiles[(row-1, col)], passable_cells) == False:
+            return (row-1, col)
+
+    # DOWN
+    if row <= nrows-4 and tiles[(row+2,col)] in cells_visited and tiles[(row+1,col)].symbol==TILE_WALL:
+        if is_forming_blocky(tiles, tiles[(row+1, col)], passable_cells) == False:
+            return (row+1, col)
+
+
+    # LEFT
+    if col >= 3 and tiles[(row,col-2)] in cells_visited and tiles[(row,col-1)].symbol==TILE_WALL:
+        if is_forming_blocky(tiles, tiles[(row, col-1)], passable_cells) == False:
+            return (row, col-1)
+
+
+    #RIGHT
+    if col <= ncols-4 and tiles[(row,col+2)] in cells_visited and tiles[(row,col+1)].symbol==TILE_WALL:
+        if is_forming_blocky(tiles, tiles[(row, col+1)], passable_cells) == False:
+            return (row, col+1)
+
+    return None
 
 
 def repair_corner_fixed_path(tiles, fpath, tile_1, tile_2, tile_3):
@@ -263,12 +292,12 @@ def get_new_wall_link(tiles, wall):
 
 def genmaze(nrows, ncols, path_fill_ratio=0.33):
 
-    assert nrows >= 13
-    assert ncols >= 13
+    assert nrows >= 15
+    assert ncols >= 15
 
-    # dimensions must be odd numbers and the half of it must be an even number
-    assert nrows % 2 == 1 and (nrows/2) % 2 == 0
-    assert ncols % 2 == 1 and (ncols/2) % 2 == 0
+    # dimensions must be odd numbers
+    assert nrows % 2 == 1
+    assert ncols % 2 == 1
 
     rc = nrows/2
     cc = ncols/2
@@ -311,13 +340,30 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
             list('#*****#'),
             list('#######')
             ]
-    for row in [rc-3, rc-2, rc-1, rc, rc+1]:
-        for col in [cc-3, cc-2, cc-1, cc, cc+1, cc+2, cc+3]:
-            symbol = ghost_chamber[row-(rc-3)][col-(cc-3)]
+    if rc %2 == 0: # even row center
+        rowrange = [rc-3, rc-2, rc-1, rc, rc+1]
+    else:
+        rowrange = [rc-2, rc-1, rc, rc+1, rc+2]
+    if cc %2 == 0: # even column center
+        colrange = [cc-3, cc-2, cc-1, cc, cc+1, cc+2, cc+3]
+    else:
+        colrange = [cc-4, cc-3, cc-2, cc-1, cc, cc+1, cc+2]
+
+    for row in rowrange:
+        for col in colrange:
+            symbol = ghost_chamber[row-rowrange[0]][col-colrange[0]]
             tiles[(row,col)].symbol = symbol
 
     # The eatman's location
-    tiles[(rc+5,cc)].symbol = TILE_EATMAN
+    if rc % 2 == 0:
+        re = rc + 5
+    else:
+        re = rc + 6
+    if cc % 2 == 0:
+        ce = cc
+    else:
+        ce = cc - 1
+    tiles[(re,ce)].symbol = TILE_EATMAN
 
     # count the symbol categories
     beans = []
@@ -350,8 +396,7 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
     for wall in walls:
         walls_n_links[0].append(wall)
 
-    #pmaze(tiles, nrows, ncols)
-    #format_maze(tiles, nrows, ncols)
+    #format_maze(tiles, nrows, ncols, printit=True)
 
     nlinks = 0
     done = False
@@ -402,8 +447,7 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
             break
 
     # print the maze
-    #pmaze(tiles, nrows, ncols)
-    #format_maze(tiles, nrows, ncols)
+    #format_maze(tiles, nrows, ncols, printit=True)
     
     #
     # The following section is not needed since there will be no double lanes
@@ -427,14 +471,13 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
     #    # upper right
     #    repair_corner_fixed_path(tiles, fpath, tile_u, tile_r, tile_ur)
     #    # lower left
-    #    repair_corner_fixed_path(tiles, fpath, tile_l, tile_l, tile_ll)
+    #    repair_corner_fixed_path(tiles, fpath, tile_d, tile_l, tile_ll)
     #    # lower right
-    #    repair_corner_fixed_path(tiles, fpath, tile_l, tile_r, tile_lr)
+    #    repair_corner_fixed_path(tiles, fpath, tile_d, tile_r, tile_lr)
 
     #format_maze(tiles, nrows, ncols)
     # make sure the entire maze are connected
     # TODO:
-    #  check if the breakage make holes (a block of vacany)
     #  possiblity of more than 2 isolated parts of the maze?
     cells_unvisited = []
     cells_visited = []
@@ -445,42 +488,68 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
             passable_cells = [TILE_BEAN, TILE_VACANCY, TILE_FIXED_PATH, TILE_EATMAN]
             if tiles[pos].symbol in passable_cells:
                 cells_unvisited.append(tiles[pos])
+
     # start walking the cells
     random.shuffle(cells_unvisited)
     cells_stack.append(cells_unvisited[0])
-    while len(cells_stack) > 0:
-        c_cell = cells_stack.pop()
-        possible_path = get_possible_path(tiles, c_cell, cells_unvisited)
-        for pp in possible_path:
-            if pp not in cells_stack:
-                cells_stack.append(pp)
-        cells_unvisited.remove(c_cell)
-        cells_visited.append(c_cell)
 
-    # if the maze are not connected
-    cells_possible_breakage = []
-    if len(cells_unvisited) > 0:
-        # the breakable ones
-        for cell in cells_unvisited:
-            if is_possible_breakage(tiles, nrows, ncols, cell, cells_visited):
-                cells_possible_breakage.append(cell)
-        # The most separated ones 
-        maxdist = 0
-        for cell_1 in cells_possible_breakage:
-            for cell_2 in cells_possible_breakage:
-                if cell_1 is cell_2:
-                    continue
-                dist = (cell_1.pos[0]-cell_2.pos[0])**2 + (cell_1.pos[1]-cell_2.pos[1])**2
-                if maxdist < dist:
-                    maxdist = dist
-                    pair = [cell_1, cell_2]
+    # when we still have cells that are unvisited
+    while len(cells_unvisited) > 0:
 
-        break_the_wall(tiles, nrows, ncols, pair[0], cells_visited)
-        break_the_wall(tiles, nrows, ncols, pair[1], cells_visited)
+        # when we have non-zero stacks (means we have path to walk)
+        while len(cells_stack) > 0:
+            c_cell = cells_stack.pop()
+            possible_path = get_possible_path(tiles, c_cell, cells_unvisited)
+            for pp in possible_path:
+                if pp not in cells_stack:
+                    cells_stack.append(pp)
+            cells_unvisited.remove(c_cell)
+            cells_visited.append(c_cell)
+
+        # if the maze are not connected, we find the possible place to break the wall
+        cells_possible_breakage = []
+        if len(cells_unvisited) > 0:
+            # the breakable ones
+            for cell in cells_unvisited:
+                breakpos =  find_possible_breakage(tiles, nrows, ncols, cell, cells_visited)
+                if breakpos is not None:
+                    cells_possible_breakage.append((cell, breakpos))
+            # The most separated ones 
+            maxdist = 0
+            for cell_1, breakpos_1 in cells_possible_breakage:
+                for cell_2, breakpos_2 in cells_possible_breakage:
+                    if cell_1 is cell_2:
+                        continue
+                    dist = (cell_1.pos[0]-cell_2.pos[0])**2 + (cell_1.pos[1]-cell_2.pos[1])**2
+                    if maxdist < dist:
+                        maxdist = dist
+                        pair = [(cell_1, breakpos_1), (cell_2, breakpos_2)]
+            
+            cell_1, breakpos_1 = pair[0]
+            cell_2, breakpos_2 = pair[1]
+            # break them
+            tiles[breakpos_1].symbol = TILE_VACANCY
+            tiles[breakpos_2].symbol = TILE_VACANCY
+            # add the new vacancy to the unvisited list
+            cells_unvisited.append(tiles[breakpos_1])
+            cells_unvisited.append(tiles[breakpos_2])
+            # add the cell_1 and cell_2 to the stack for new walk
+            # TODO: Ideally, we wanna to make two breakages for each of the closed area. 
+            # Thats why we choose to have cell_1 and cell_2. And starting walking from
+            # cell_1 should reach cell_2.
+            # However, if the unvisited part of the maze is still not connected by itself,
+            # the two breakges will be two of the closed areas. And cell_1 won't reach
+            # cell_2. So it has to be dealt differently. For now, we just add both cell_1
+            # and cell_2 to the stack and save us the trouble for the case when 2 or more
+            # closed areas are in the unvisited part, i.e. only one breakage will happen
+            # for each of the closed area.
+            cells_stack.append(cell_1)
+            cells_stack.append(cell_2)
+            print 'break', breakpos_1, breakpos_2
 
 
     # print the maze
-    #pmaze(tiles, nrows, ncols)
+    #format_maze(tiles, nrows, ncols, printit=True)
 
     return format_maze(tiles, nrows, ncols)
 

@@ -1,7 +1,7 @@
 set wallbgcolor 0 0 50
 set wallbrightcolor 0 0 255
 set wallshadowcolor 0 0 255
-set beancolor 102 54 47
+set beancolor 248 248 248
 ghost 0 color=CYAN fast=0.6 chilling=1.0
 ghost 1 color=PINK fast=0.6
 ghost 2 color=ORANGE fast=0.6 molten=3
