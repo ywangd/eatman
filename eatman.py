@@ -230,6 +230,8 @@ config = Config() # Read the config.ini file
 resource = Resource()
 hiscore = 0
 score = 0
+nlifes = 3
+nlifes_reward = 0
 BASICFONT = None
 
 #################################################################################
@@ -259,15 +261,19 @@ class Level(object):
         self.iLevel = iLevel
 
         for ii in range(4):
-            fastratio = 0.7 + iLevel*(1.0/20.0)*0.5
-            if fastratio > 1.2:
-                fastratio = 1.2
+            fastratio = 0.6 + iLevel*(1.0/20.0)*0.4
+            if ii==3: # red
+                fastratio *= 1.05
+            if fastratio > 1.0:
+                fastratio = 1.0
             self.ghost_params[ii]['fast'] = fastratio
-            if ii==2:
-                moltenratio = iLevel*5
+
+            if ii==2: # orange
+                moltenratio = iLevel*3
                 if moltenratio >= 50:
                     moltenratio = 50
                 self.ghost_params[ii]['molten'] = moltenratio
+
 
         filename = os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat') 
         if os.path.exists(filename):
@@ -614,7 +620,8 @@ class Ghost(object):
     TPS_PURSUER   = 3
     TPS_ALL = [TPS_WHIMSICAL, TPS_AMBUSHER, TPS_IGNORANCE, TPS_PURSUER]
 
-    # The pursuer is special
+    # The pursuer is special since whimsical will use pursuer and eatman's
+    # position to choose its target
     pursuer = None
 
 
@@ -723,7 +730,7 @@ class Ghost(object):
 
         # chilling rate, time started, duration
         if level.ghost_params[idx].has_key('chilling'):
-            eatman.add_freq_modifier(level.ghost_params[idx]['chilling'], 1e20)
+            eatman.add_freq_modifier(level.ghost_params[idx]['chilling'], -1)
 
         # Load the images
         self.load_sprites()
@@ -1032,9 +1039,7 @@ class Eatman(object):
     def __init__(self, level):
 
         self.motion          = Eatman.MOTION_IDLE
-
         self.direction      = STATIC
-        self.nlifes         = 3
 
         self.xypos = uv_to_xy(level.eatman_params['uvpos'])
 
@@ -1050,7 +1055,6 @@ class Eatman(object):
         self.lastSlayerTime = time.time()
 
         self.energy = 0
-
         self.lastEatTime = time.time()
 
 
@@ -1155,7 +1159,7 @@ def apply_buff(buff, eatman, ghosts, fires):
     elif buff == FREEZE:
         for ghost in ghosts:
             ghost.add_freq_modifier(99999.9, 4.0) # slow 99999.9 times for 4 seconds
-    elif buff == BOMB:
+    elif buff == BOMB: # randomly blow up a ghost
         ghost_to_die = []
         for ghost in ghosts:
             if ghost.mode != Ghost.MODE_DYING or ghost.mode != Ghost.MODE_DEAD:
@@ -1367,6 +1371,48 @@ def check_hit(level, eatman, ghosts, fires):
     return gameState
 
 
+def reset_after_lose(level, eatman, ghosts, fires):
+    global gameState
+
+    gameState = GAME_STATE_NORMAL
+
+    # eatman
+    eatman.motion = Eatman.MOTION_IDLE
+    eatman.direction = STATIC
+    eatman.idx_frame = 0
+    eatman.lastAnimTime = 0
+    eatman.lastEatTime = time.time()
+    eatman.xypos = uv_to_xy(level.eatman_params['uvpos'])
+    for key in eatman.freq_modifier.keys():
+        value, stime, duration = eatman.freq_modifier[key]
+        if duration > 0:
+            del eatman.freq_modifier[key]
+
+    # eatman
+    for ghost in ghosts:
+        ghost.motion = Ghost.MOTION_IDLE
+        ghost.pathway = ''
+        ghost.mode = Ghost.MODE_SCATTER
+        ghost.oldMode = ghost.mode
+        ghost.mode_duration = ghost.generate_mode_duration()
+        ghost.nalters = 0
+        ghost.lastMaTime = time.time()
+        ghost.xypos = uv_to_xy(level.ghost_params[ghost.id]['uvpos'])
+        ghost.direction = STATIC
+        ghost.movedFrom = None
+        ghost.idx_frame = 0
+        ghost.lastAnimTime = time.time()
+        ghost.lastIndoorTime = time.time()
+        for key in ghost.freq_modifier.keys():
+            value, stime, duration = self.freq_modifier[key]
+            if duration > 0: # duration is positive means its a temporary buff
+                del ghost.freq_modifier[key]
+
+    # eliminate all the fires
+    for id in range(len(fires)-1, -1,-1):
+        del fires[id]
+    
+
 def draw_game_stats(level, eatman, ghosts):
 
     global score
@@ -1390,6 +1436,11 @@ def draw_game_stats(level, eatman, ghosts):
             [rect[0]+rect[2]+10, rect[1]-2])
     rect[2] = int(level.rect_energy[2]*percent)
     pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
+
+    # nlifes
+    xx = 10
+    for ii in range(1,nlifes):
+        DISPLAYSURF.blit(eatman.frames[STATIC], (xx+(ii-1)*34, WINDOW_HEIGHT-2*TILE_HEIGHT))
 
 
 def make_text_image(text, font, color):
@@ -1453,6 +1504,9 @@ def show_title_screen():
 def show_lose_screen():
     show_text_screen('Lose')
 
+def show_gameover_screen():
+    show_text_screen('Game Over')
+
 def show_win_screen():
     show_text_screen('Win')
 
@@ -1462,7 +1516,7 @@ def save_hiscore(score):
 
 def main():
 
-    global gameState, score, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS
+    global gameState, score, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS, nlifes
 
     pygame.init()
     CLOCK_FPS = pygame.time.Clock()
@@ -1470,7 +1524,7 @@ def main():
 
     BASICFONT = pygame.font.Font('freesansbold.ttf', 18)
     #BASICFONT = pygame.font.SysFont(None, 18)
-    BIGFONT = pygame.font.Font('freesansbold.ttf', 100)
+    BIGFONT = pygame.font.Font('freesansbold.ttf', 90)
     #BIGFONT = pygame.font.SysFont(None, 100)
 
     pygame.display.set_caption('EatMan')
@@ -1489,9 +1543,10 @@ def main():
         if gameState == GAME_STATE_DEAD:
             if score > hiscore:
                 save_hiscore(score)
-            show_lose_screen()
+            show_gameover_screen()
             score = 0
             iLevel = iLevel_start
+            nlifes = 3
         elif gameState == GAME_STATE_WIN:
             if score > hiscore:
                 save_hiscore(score)
@@ -1501,7 +1556,7 @@ def main():
 
 def run_game(iLevel):
 
-    global gameState, DISPLAYSURF, WINDOW_WIDTH, WINDOW_HEIGHT
+    global gameState, DISPLAYSURF, WINDOW_WIDTH, WINDOW_HEIGHT, nlifes
 
     # Reset game status and reset the screen to black to start
     gameState = GAME_STATE_NORMAL
@@ -1658,18 +1713,23 @@ def run_game(iLevel):
         for ghost in ghosts:
             ghost.draw(DISPLAYSURF, eatman)
 
+        # Draw game state infos
+        draw_game_stats(level, eatman, ghosts)
+        
         # Dead?
         if gameState == GAME_STATE_DYING:
             gameState = eatman.animate_dead(DISPLAYSURF)
             if gameState == GAME_STATE_DEAD:
-                time.sleep(0.5)
-                loopit = False
+                nlifes -= 1
+                if nlifes == 0:
+                    time.sleep(0.5)
+                    loopit = False
+                else:
+                    show_lose_screen()
+                    reset_after_lose(level, eatman, ghosts, fires)
         else:
             eatman.draw(DISPLAYSURF)
 
-        # Draw game state infos
-        draw_game_stats(level, eatman, ghosts)
-        
         # Win?
         if gameState == GAME_STATE_WIN:
             loopit = False

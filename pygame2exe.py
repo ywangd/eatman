@@ -65,7 +65,7 @@ class BuildExe:
         self.project_description = "A Pac-Man clone with some improved mechanics."
  
         #Icon file (None will use pygame default icon)
-        self.icon_file = 'pyc.ico'
+        self.icon_file = 'eatman.ico'
  
         #Extra files/dirs copied to game
         self.extra_datas = ['levels','sounds','sprites','tiles','config.ini','hiscore.txt','freesansbold.ttf']
