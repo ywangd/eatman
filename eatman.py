@@ -14,7 +14,7 @@ ywangd@gmail.com
 
 # TODO
 # 1. Buff icon flash
-# 2. bomb animation
+# 2. bomb animation/sound
 
 
 def we_are_frozen():
@@ -603,6 +603,34 @@ class FlashingTexts(object):
             return True
         else:
             return False
+
+class Explosion(object):
+
+    def __init__(self):
+        self.xypos = [0, 0]
+        self.active = False
+        self.lastAnimTime = time.time()
+        self.animFreq = config.get('Buff','fexplosion_animatefrequency')
+        self.idx_frame = 0
+        self.frame_sequence = [1,2,3,4,5,6,7,8,9]
+
+    def start(self, xypos):
+        self.xypos = copy.copy(xypos)
+        self.active = True
+        self.lastAnimTime = time.time()
+
+    def animate(self, DISPLAYSURF):
+        if not self.active:
+            return
+
+        id = self.frame_sequence[self.idx_frame]
+        DISPLAYSURF.blit(resource.exploding['exploding-'+str(id)], self.xypos)
+        if time.time()-self.lastAnimTime > self.animFreq:
+            self.idx_frame += 1
+            self.lastAnimTime = time.time()
+            if self.idx_frame >= len(self.frame_sequence):
+                self.idx_frame = 0
+                self.active = False
 
 
 class Fire(object):
@@ -1268,7 +1296,7 @@ class Bean(object):
         self.uvpos = uvpos
         self.image = image
 
-def apply_buff(buff, eatman, ghosts, fires):
+def apply_buff(buff, eatman, ghosts, fires, explosion):
 
     if buff == BUFF_SLOW:
         for ghost in ghosts:
@@ -1283,7 +1311,8 @@ def apply_buff(buff, eatman, ghosts, fires):
                 ghost_to_die.append(ghost)
         if len(ghost_to_die) > 0:
             ghost_to_die = random.choice(ghost_to_die)
-            ghost_to_die.mode = ghost.MODE_DYING
+            ghost_to_die.mode = Ghost.MODE_DYING
+            explosion.start(ghost_to_die.xypos)
     elif buff == BUFF_SPEED:
         eatman.add_freq_modifier(config.get('Buff','fspeed_rate'), config.get('Buff','fspeed_duration')) 
 
@@ -1401,7 +1430,7 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
         return False
 
 
-def check_hit(level, eatman, ghosts, fires, fruits, ftexts):
+def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion):
 
     global score, score_reward, nlifes
 
@@ -1432,7 +1461,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts):
         if [u, v] == [gu, gv]:
             if ghost.mode == Ghost.MODE_FREIGHTEN:
                 # eat a ghost
-                ghost.mode = ghost.MODE_DYING
+                ghost.mode = Ghost.MODE_DYING
                 score += 100
                 neats += 1
                 isJustEat = True
@@ -1483,7 +1512,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts):
         # check if energy is full
         if eatman.energy > level.energyLevel[level.idx_energyLevel]:
             buff = level.buffs[level.idx_energyLevel-1]
-            apply_buff(buff, eatman, ghosts, fires)
+            apply_buff(buff, eatman, ghosts, fires, explosion)
             level.idx_energyLevel += 1
         # win if beans all consumed
         if level.nbeans == 0:
@@ -1510,7 +1539,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts):
         # check if energy is full
         if eatman.energy > level.energyLevel[level.idx_energyLevel]:
             buff = level.buffs[level.idx_energyLevel-1]
-            apply_buff(buff, eatman, ghosts, fires)
+            apply_buff(buff, eatman, ghosts, fires, explosion)
             level.idx_energyLevel += 1
         # win if beans all consumed
         if level.nbeans == 0:
@@ -1770,6 +1799,9 @@ def run_game(iLevel):
     # The fruit
     fruits = []
 
+    # Explosion
+    explosion = Explosion()
+
     moveLeft  = False
     moveRight = False
     moveUp    = False
@@ -1890,7 +1922,7 @@ def run_game(iLevel):
                 level.fruit_lastSpawnTime = time.time()
 
             # Check if anything is hit
-            gameState = check_hit(level, eatman, ghosts, fires, fruits, ftexts)
+            gameState = check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion)
 
 
         # Start the drawing
@@ -1902,6 +1934,9 @@ def run_game(iLevel):
                 del fires[id] 
             else:
                 fires[id].animate(DISPLAYSURF)
+
+        # explosion
+        explosion.animate(DISPLAYSURF)
 
         # fruit
         for fruit in fruits:
