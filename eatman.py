@@ -33,7 +33,7 @@ def module_path():
 #SRCDIR = 'C:\\eatman'
 SRCDIR                  = module_path()
 
-FPS                     = 60
+FPS                     = 200
 FPS_LOW                 = 10
 
 WINDOW_WIDTH            = 504
@@ -1630,8 +1630,7 @@ def show_text_screen(text, color=WHITE):
 
     while check_for_key_press() == None:
         pygame.display.update()
-
-    CLOCK_FPS.tick(FPS_LOW)
+        CLOCK_FPS.tick(FPS_LOW)
 
 
 def check_for_quit():
@@ -1943,7 +1942,7 @@ def run_game(iLevel):
         # Update the actual screen image
         pygame.display.update()
 
-        #CLOCK_FPS.tick(FPS)
+        CLOCK_FPS.tick(FPS)
 
 
 if __name__ == '__main__':
