@@ -220,7 +220,7 @@ def get_nwalls_surrounded(tiles, pos):
     return nwalls
 
 
-def get_new_wall_link(tiles, wall):
+def get_new_wall_link(tiles, nrows, ncols, wall):
     '''
     A link is a group of three walls in a horizontal or vertical fashion.
     e.g. @@@ is a horizontal link. The character in the middle is called
@@ -229,58 +229,169 @@ def get_new_wall_link(tiles, wall):
 
     row, col = wall.pos # this is our starting anchor and we need to find the ending one
 
+    # possible links from 4 directions
+    UP          = (row-2, col)
+    DOWN        = (row+2, col)
+    LEFT        = (row, col-2)
+    RIGHT       = (row, col+2)
     candidates = []
     # Get possible link anchor from all 4 directions. 
     # The possible links must be between walls.
     possible_anchor = [TILE_WALL]
-    if tiles[(row-2, col)].symbol in possible_anchor:
-        candidates.append((row-2, col))
-    if tiles[(row+2, col)].symbol in possible_anchor:
-        candidates.append((row+2, col))
-    if tiles[(row, col-2)].symbol in possible_anchor:
-        candidates.append((row, col-2))
-    if tiles[(row, col+2)].symbol in possible_anchor:
-        candidates.append((row, col+2))
+    if tiles[UP].symbol in possible_anchor:
+        candidates.append(UP)
+    if tiles[DOWN].symbol in possible_anchor:
+        candidates.append(DOWN)
+    if tiles[LEFT].symbol in possible_anchor:
+        candidates.append(LEFT)
+    if tiles[RIGHT].symbol in possible_anchor:
+        candidates.append(RIGHT)
 
     # The links cannot be built through an existing wall or
     # a fixed path or the eatman
     invalid_passage = [TILE_WALL, TILE_FIXED_PATH, TILE_EATMAN]
-    if tiles[(row-1,col)].symbol in invalid_passage:
-        if (row-2,col) in candidates:
-            candidates.remove((row-2,col))
-    if tiles[(row+1,col)].symbol in invalid_passage:
-        if (row+2,col) in candidates:
-            candidates.remove((row+2,col))
-    if tiles[(row,col-1)].symbol in invalid_passage:
-        if (row,col-2) in candidates:
-            candidates.remove((row,col-2))
-    if tiles[(row,col+1)].symbol in invalid_passage:
-        if (row,col+2) in candidates:
-            candidates.remove((row,col+2))
+    if UP in candidates and tiles[(row-1,col)].symbol in invalid_passage:
+        candidates.remove(UP)
+    if DOWN in candidates and tiles[(row+1,col)].symbol in invalid_passage:
+        candidates.remove(DOWN)
+    if LEFT in candidates and tiles[(row,col-1)].symbol in invalid_passage:
+        candidates.remove(LEFT)
+    if RIGHT in candidates and tiles[(row,col+1)].symbol in invalid_passage:
+        candidates.remove(RIGHT)
 
     # Check if any link would make a vacancy become surrounded by 3 
     # or more walls. We need to disqualify them. 
     # The vacancy are those adjacent to the link's passage
-    if get_nwalls_surrounded(tiles, (row-1, col-1)) >=2: # upper left
-        if (row-2,col) in candidates:
-            candidates.remove((row-2,col))
-        if (row,col-2) in candidates:
-            candidates.remove((row,col-2))
-    if get_nwalls_surrounded(tiles, (row-1, col+1)) >=2: # upper right
-        if (row-2,col) in candidates:
-            candidates.remove((row-2,col))
-        if (row,col+2) in candidates:
-            candidates.remove((row,col+2))
-    if get_nwalls_surrounded(tiles, (row+1, col-1)) >=2: # lower left
-        if (row+2,col) in candidates:
-            candidates.remove((row+2,col))
-        if (row,col-2) in candidates:
-            candidates.remove((row,col-2))
-    if get_nwalls_surrounded(tiles, (row+1, col+1)) >=2: # lower right
-        if (row+2,col) in candidates:
-            candidates.remove((row+2,col))
-        if (row,col+2) in candidates:
-            candidates.remove((row,col+2))
+    nwalls_ul = get_nwalls_surrounded(tiles, (row-1, col-1))  # upper left
+    nwalls_ur = get_nwalls_surrounded(tiles, (row-1, col+1))  # upper right
+    nwalls_ll = get_nwalls_surrounded(tiles, (row+1, col-1))  # lower left
+    nwalls_lr = get_nwalls_surrounded(tiles, (row+1, col+1))  # lower right
+
+    if UP in candidates:
+        if nwalls_ul >= 2 or nwalls_ur >= 2:
+            candidates.remove(UP)
+
+    if DOWN in candidates:
+        if nwalls_ll >= 2 or nwalls_lr >= 2:
+            candidates.remove(DOWN)
+
+    if LEFT in candidates:
+        if nwalls_ul >= 2 or nwalls_ll >= 2:
+            candidates.remove(LEFT)
+
+    if RIGHT in candidates:
+        if nwalls_ur >=2 or nwalls_lr >= 2:
+            candidates.remove(RIGHT)
+
+    # TODO: this part does not really work as intended
+    # make sure the walls do not form a C shape
+    # walk the cell and find all the wall its connected
+    walk_stack = []
+    walk_stack.append(wall)
+    walk_visited = []
+    while len(walk_stack) > 0:
+        c_cell = walk_stack.pop()
+        walk_visited.append(c_cell)
+        c_row, c_col = c_cell.pos
+        if c_row <=0 or c_row >= nrows-1 or c_col <= 0 or c_col >= ncols-1:
+            continue
+        if c_row-1 > 0:
+            up_cell = tiles[(c_row-1,c_col)]
+            if up_cell.symbol == TILE_WALL and up_cell not in walk_visited and up_cell not in walk_stack:
+                walk_stack.append(up_cell)
+
+        if c_row+1 < nrows-1:
+            down_cell = tiles[(c_row+1,c_col)]
+            if down_cell.symbol == TILE_WALL and down_cell not in walk_visited and down_cell not in walk_stack:
+                walk_stack.append(down_cell)
+
+        if c_col-1 > 0:
+            left_cell = tiles[(c_row,c_col-1)]
+            if left_cell.symbol == TILE_WALL and left_cell not in walk_visited and left_cell not in walk_stack:
+                walk_stack.append(left_cell)
+
+        if c_col+1 < ncols-1:
+            right_cell = tiles[(c_row,c_col+1)]
+            if right_cell.symbol == TILE_WALL and right_cell not in walk_visited and right_cell not in walk_stack:
+                walk_stack.append(right_cell)
+    walk_visited.remove(wall)
+
+    for ii in range(len(candidates)-1,-1,-1):
+        cand = candidates[ii]
+        walk_stack_cand = []
+        walk_visited_cand = []
+        walk_stack_cand.append(tiles[cand])
+        while len(walk_stack_cand) > 0:
+            c_cell = walk_stack_cand.pop()
+            walk_visited_cand.append(c_cell)
+            c_row, c_col = c_cell.pos
+            if c_row <=0 or c_row >= nrows-1 or c_col <= 0 or c_col >= ncols-1:
+                continue
+            if c_row-1 > 0:
+                up_cell = tiles[(c_row-1,c_col)]
+                if up_cell.symbol == TILE_WALL \
+                        and up_cell not in walk_visited_cand and up_cell not in walk_stack_cand:
+                    walk_stack_cand.append(up_cell)
+
+            if c_row+1 < nrows-1:
+                down_cell = tiles[(c_row+1,c_col)]
+                if down_cell.symbol == TILE_WALL \
+                        and down_cell not in walk_visited_cand and down_cell not in walk_stack_cand:
+                    walk_stack_cand.append(down_cell)
+
+            if c_col-1 > 0:
+                left_cell = tiles[(c_row,c_col-1)]
+                if left_cell.symbol == TILE_WALL \
+                        and left_cell not in walk_visited_cand and left_cell not in walk_stack_cand:
+                    walk_stack_cand.append(left_cell)
+
+            if c_col+1 < ncols-1:
+                right_cell = tiles[(c_row,c_col+1)]
+                if right_cell.symbol == TILE_WALL \
+                        and right_cell not in walk_visited_cand and right_cell not in walk_stack_cand:
+                    walk_stack_cand.append(right_cell)
+        walk_visited_cand.remove(tiles[cand])
+
+        disqualified = False
+        for cell in walk_visited:
+            if cand == UP and cell.pos[0] < wall.pos[0]:
+                disqualified = True
+                del candidates[ii]
+                break
+            elif cand == DOWN and cell.pos[0] > wall.pos[0]:
+                disqualified = True
+                del candidates[ii]
+                break
+            elif cand == LEFT and cell.pos[1] < wall.pos[1]:
+                disqualified = True
+                del candidates[ii]
+                break
+            elif cand == RIGHT and cell.pos[1] > wall.pos[1]:
+                disqualified = True
+                del candidates[ii]
+                break
+
+        if disqualified:
+            continue
+
+        for cell in walk_visited_cand:
+            if cand == UP and cell.pos[0] > cand[0]:
+                disqualified = True
+                del candidates[ii]
+                break
+            elif cand == DOWN and cell.pos[0] < cand[0]:
+                disqualified = True
+                del candidates[ii]
+                break
+            elif cand == LEFT and cell.pos[1] > cand[1]:
+                disqualified = True
+                del candidates[ii]
+                break
+            elif cand == RIGHT and cell.pos[1] < cand[1]:
+                disqualified = True
+                del candidates[ii]
+                break
+
 
     # choose the link randomly
     if len(candidates) > 0:
@@ -335,13 +446,13 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
 
     # The ghost chamber
     ghost_chamber = [
-            '*@@#@#@@*',
+            '@@@#@#@@@',
             '*###3###*', 
             '*#**=**#*', 
             '##*012*##', 
             '*#*****#*',
             '*#######*',
-            '*#@@@@@#*',
+            '@#@@@@@#@',
             ]
     if rc %2 == 0: # even row center
         rowrange = [rc-4,rc-3, rc-2, rc-1, rc, rc+1,rc+2]
@@ -436,7 +547,7 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
             row, col = wall.pos
 
             # get the link candidate
-            newlink_wall = get_new_wall_link(tiles, wall)
+            newlink_wall = get_new_wall_link(tiles, nrows, ncols, wall)
 
             # if this wall can not be build further, we remove it
             if newlink_wall is None:
@@ -574,7 +685,6 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
             # for each of the closed area.
             cells_stack.append(cell_1)
             cells_stack.append(cell_2)
-            print 'break', breakpos_1, breakpos_2
 
     # make the tunnel open
     tunnel_left = [

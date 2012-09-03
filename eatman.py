@@ -242,7 +242,7 @@ config = Config() # Read the config.ini file
 resource = Resource()
 hiscore = 0
 score = 0
-nlifes = 3
+nlifes = 0
 score_reward = 0
 BASICFONT = None
 
@@ -297,7 +297,7 @@ class Level(object):
             infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
             data = infile.readlines()
         else:
-            path_fill_ratio = random.uniform(0.12, 0.17)
+            path_fill_ratio = random.uniform(0.12, 0.16)
             # dimension size, increase by 2 every 4 levels
             nrows = 21 + (iLevel/4)*2
             if nrows > 29:
@@ -1736,6 +1736,7 @@ def main():
     resource.load_sounds()
     resource.load_sprites()
 
+    nlifes = config.get('Game','ilifes')
     score_reward = config.get('Game','iscorereward')
 
     iLevel = 1 if len(sys.argv)==1 else int(sys.argv[1])
@@ -1749,7 +1750,7 @@ def main():
             show_gameover_screen()
             score = 0
             iLevel = iLevel_start
-            nlifes = 3
+            nlifes = config.get('Game','ilifes')
         elif gameState == GAME_STATE_WIN:
             if score > hiscore:
                 save_hiscore(score)
