@@ -60,6 +60,7 @@ DOWN                    = 'd'
 LEFT                    = 'l'
 RIGHT                   = 'r'
 
+L_TELEPORT              = '$'
 L_BLOCK                 = '#' # so no bean will be there
 L_WALL                  = '*'
 L_GHOST_DOOR            = '='
@@ -156,6 +157,7 @@ class Resource(object):
         self.glasses = {}
         self.buffs = {}
         self.exploding = {}
+        self.fruits = []
 
         files = os.listdir(os.path.join(SRCDIR,'sprites'))
         for filename in files:
@@ -193,6 +195,10 @@ class Resource(object):
             if filename[0:-6] == 'exploding':
                 self.exploding[filename[0:-4]] = pygame.image.load(
                         os.path.join(SRCDIR,'sprites',filename)).convert()
+
+            if filename[0:-6] == 'fruit':
+                self.fruits.append(
+                        pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert())
 
 
     def recolor_tiles(self, level):
@@ -233,7 +239,7 @@ resource = Resource()
 hiscore = 0
 score = 0
 nlifes = 3
-nlifes_reward = 0
+score_reward = 0
 BASICFONT = None
 
 #################################################################################
@@ -241,6 +247,7 @@ BASICFONT = None
 class Level(object):
 
     def __init__(self):
+        self.stime = time.time()
         self.wallbgcolor = (0, 0, 0)
         self.beancolor = (255, 255, 255)
         self.wallbrightcolor = (0, 0, 255)
@@ -258,6 +265,10 @@ class Level(object):
 
         self.buffs = copy.copy(BUFFS_ALL)
         random.shuffle(self.buffs)
+
+        self.uvpos_teleport = []
+
+        self.fruit_lastSpawnTime = time.time()
 
     def load(self, iLevel):
         self.iLevel = iLevel
@@ -282,7 +293,7 @@ class Level(object):
             infile = open(os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat'))
             data = infile.readlines()
         else:
-            path_fill_ratio = random.uniform(0.20, 0.30)
+            path_fill_ratio = random.uniform(0.12, 0.17)
             # dimension size, increase by 2 every 4 levels
             nrows = 21 + (iLevel/4)*2
             if nrows > 29:
@@ -338,6 +349,8 @@ class Level(object):
         for line in self.data:
             assert len(line) == self.ncols
 
+        # the fruit interval increases with the maze size
+        self.fruit_interval = config.get('Fruit','finterval') + (self.ncols-21)*5
 
     def set_data(self, data):
         self.data = []
@@ -438,7 +451,6 @@ class Level(object):
         self.idx_energyLevel = 1
 
         self.energy_decay_time = 2.0
-
 
 
     def analyze_tile(self, ix, iy):
@@ -552,6 +564,10 @@ class Level(object):
         elif char == L_BLOCK:
             return None
 
+        elif char == L_TELEPORT:
+            self.uvpos_teleport.append([ix, iy])
+            return None
+
         return None
 
 
@@ -566,11 +582,31 @@ class Level(object):
             DISPLAYSURF.blit(obj.image, uv_to_xy(obj.uvpos))
 
 
+class FlashingTexts(object):
+    
+    def __init__(self, text, xypos, duration=1.0):
+        self.stime = time.time()
+        self.duration = duration
+        self.surf, self.rect = make_text_image(text, BASICFONT, GRASS)
+        self.rect.topleft = xypos
+
+    def animate(self, DISPLAYSURF):
+        if (round(time.time(),1)*10 % 2) == 0:
+            DISPLAYSURF.blit(self.surf, self.rect)
+
+    def is_expired(self):
+        if time.time()-self.stime > self.duration:
+            return True
+        else:
+            return False
+
+
 class Fire(object):
 
     def __init__(self, uvpos):
 
         self.uvpos = uvpos
+        self.xypos = uv_to_xy(uvpos)
         self.stime = time.time()
 
         self.lastAnimTime = time.time()
@@ -581,12 +617,86 @@ class Fire(object):
 
     def animate(self, DISPLAYSURF):
         id = self.frame_sequence[self.idx_frame]
-        DISPLAYSURF.blit(resource.fires['fire-'+str(id)], uv_to_xy(self.uvpos))
+        DISPLAYSURF.blit(resource.fires['fire-'+str(id)], self.xypos)
         if time.time()-self.lastAnimTime > self.animFreq:
             self.idx_frame += 1
             self.lastAnimTime = time.time()
             if self.idx_frame >= len(self.frame_sequence):
                 self.idx_frame = 0
+
+    def is_expired(self):
+        if time.time()-self.stime > self.duration:
+            return True
+        else:
+            return False
+
+
+class Fruit(object):
+
+    MOTION_IDLE = 1
+    MOTION_ANIMATE = 2
+
+    lastSpawnTime = time.time()
+    
+    def __init__(self, level):
+        self.animFreq = config.get('Fruit','fanimatefrequency')
+        self.speed = config.get('Fruit', 'ispeed')
+        self.stime = time.time()
+        self.duration = config.get('Fruit', 'fduration')
+        self.surf = random.choice(resource.fruits)
+        self.xypos = uv_to_xy(random.choice(level.uvpos_teleport))
+        self.pathway = RIGHT if self.xypos[0] <= TILE_WIDTH else LEFT
+        self.movedFrom = None
+        self.direction = self.pathway
+        self.motion = Fruit.MOTION_ANIMATE
+        self.idx_frame = 0
+        self.y_adjust = [0, 1, 2, 3, 4, 3, 2, 1, 0]
+        self.nframes = len(self.y_adjust)
+        self.lastAnimTime = self.stime
+
+    def draw(self, DISPLAYSURF):
+        # we need to adjust y position for bumping effects
+        if time.time()-self.stime > self.duration - 1.5:
+            if self.idx_frame % 2 == 0:
+                DISPLAYSURF.blit(self.surf, (self.xypos[0], self.xypos[1]+self.y_adjust[self.idx_frame]))
+        else:
+            DISPLAYSURF.blit(self.surf, (self.xypos[0], self.xypos[1]+self.y_adjust[self.idx_frame]))
+
+    def make_move(self, level):
+        if self.motion == Fruit.MOTION_ANIMATE and time.time()-self.lastAnimTime>self.animFreq:
+            self.idx_frame += 1
+            if self.idx_frame >= self.nframes:
+                self.idx_frame = 0
+                self.motion = Fruit.MOTION_IDLE
+                self.movedFrom = get_opposite_direction(self.direction)
+                resource.sounds['fruitbounce'].play()
+            else:
+                if self.direction == DOWN:
+                    self.xypos[1] += self.speed
+                elif self.direction == UP:
+                    self.xypos[1] -= self.speed
+                elif self.direction == LEFT:
+                    self.xypos[0] -= self.speed
+                elif self.direction == RIGHT:
+                    self.xypos[0] += self.speed
+                self.lastAnimTime = time.time()
+
+        if self.motion == Fruit.MOTION_IDLE:
+            if self.pathway is not None and len(self.pathway) > 0:
+                self.follow_pathway()
+                return
+            self.pathway = randpath(level, self)
+            self.follow_pathway()
+
+    def follow_pathway(self):
+        if len(self.pathway) > 0:
+            moveto = self.pathway[0]
+            self.pathway = self.pathway[1:]
+            self.motion = Ghost.MOTION_ANIMATE
+            self.direction = moveto
+        else:
+            self.motion = Ghost.MOTION_IDLE
+            self.direction = STATIC
 
     def is_expired(self):
         if time.time()-self.stime > self.duration:
@@ -1065,6 +1175,7 @@ class Eatman(object):
         frame_sequence = [1,2,3,4,5,4,3,2,1]
         self.nframes = len(frame_sequence)
 
+        # frames for moving all directions
         self.frames = {}
         for direc in directions:
             self.frames[direc] = []
@@ -1072,10 +1183,10 @@ class Eatman(object):
                 filename = os.path.join(
                         SRCDIR,'sprites','eatman-'+direc+'-'+str(frame_sequence[idx_frame])+'.gif')
                 self.frames[direc].append(pygame.image.load(filename).convert())
-
+        # the static one
         self.frames[STATIC] = pygame.image.load(os.path.join(SRCDIR,'sprites','eatman.gif')).convert()
 
-        # load the game over animation
+        # load the dead animation
         self.frames_dead = []
         self.frames_dead.append(
                 pygame.image.load(os.path.join(SRCDIR,'sprites','eatman-u-5.gif')).convert())
@@ -1273,7 +1384,7 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
     u += uoffset
     v += voffset
 
-    if u >= level.ncols or v >=level.nrows or u <= 0 or v <= 0:
+    if u >= level.ncols or v >=level.nrows or u < 0 or v < 0:
         return False
 
     blocks = [L_WALL, L_GHOST_DOOR]
@@ -1286,34 +1397,72 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
         return False
 
 
-def check_hit(level, eatman, ghosts, fires):
+def check_hit(level, eatman, ghosts, fires, fruits, ftexts):
 
-    global score 
+    global score, score_reward, nlifes
 
     u, v = xy_to_uv(eatman.xypos)
 
+    # Going through the ends of the tunnels
+    if u == 0: 
+        eatman.xypos = [(level.ncols-2)*TILE_WIDTH+eatman.xypos[0], eatman.xypos[1]]
+        u = level.ncols - 2
+    elif u == level.ncols-1:
+        eatman.xypos = [eatman.xypos[0]-(level.ncols-2)*TILE_WIDTH, eatman.xypos[1]]
+        u, v = xy_to_uv(eatman.xypos) 
+        u = 1
+
     # hit a ghost?
+    neats = 0
+    isJustEat = False
     for ghost in ghosts:
-        if [u, v] == xy_to_uv(ghost.xypos):
+        gu, gv = xy_to_uv(ghost.xypos)
+        # Going through the ends of the tunnels
+        if gu == 0:
+            ghost.xypos = [(level.ncols-2)*TILE_WIDTH+ghost.xypos[0], ghost.xypos[1]]
+            gu = level.ncols - 2
+        elif gu == level.ncols-1:
+            ghost.xypos = [ghost.xypos[0]-(level.ncols-2)*TILE_WIDTH, ghost.xypos[1]]
+            gu = 1
+        # check the hit
+        if [u, v] == [gu, gv]:
             if ghost.mode == Ghost.MODE_FREIGHTEN:
                 # eat a ghost
                 ghost.mode = ghost.MODE_DYING
-                eatman.lastEatTime = time.time()
                 score += 100
-
+                neats += 1
+                isJustEat = True
+                eatman.lastEatTime = time.time()
+                resource.sounds['eatghost'].play()
             elif ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
-                pass
-
+                neats += 1
             else:
                 # killed by a ghost
                 eatman.idx_frame = 0
                 return GAME_STATE_DYING
+        else:
+            if ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
+                neats += 1
+    # bonus score for eating all ghosts
+    # isJustEat is used to prevent the score being awarded multiple times when
+    # all ghosts are dead. It ensure the awards only happens when the EatMan just
+    # eat the last alive ghost
+    if neats == len(ghosts) and isJustEat:
+        score += 1000
+        ftexts.append(FlashingTexts('1000', eatman.xypos))
 
     # hit a fire?
     for fire in fires:
         if fire.uvpos == [u, v]:
             eatman.idx_frame = 0
             return GAME_STATE_DYING
+
+    # hit a fruit?
+    for id in range(len(fruits)-1,-1,-1):
+        if [u, v] == xy_to_uv(fruits[id].xypos):
+            score += 400
+            ftexts.append(FlashingTexts('400', fruits[id].xypos))
+            del fruits[id]
 
     # Check if a bean is hit
     if level.data[v][u] == L_BEAN:
@@ -1362,6 +1511,13 @@ def check_hit(level, eatman, ghosts, fires):
         # win if beans all consumed
         if level.nbeans == 0:
             return GAME_STATE_WIN
+    
+    # add life reward
+    if score >= score_reward:
+        nlifes += 1
+        score_reward *= 2
+        ftexts.append(FlashingTexts('1-up', eatman.xypos, duration=2.0))
+        resource.sounds['extralife'].play()
 
     # Do we need decay the energy
     if time.time() - eatman.lastEatTime > level.energy_decay_time:
@@ -1373,7 +1529,7 @@ def check_hit(level, eatman, ghosts, fires):
     return gameState
 
 
-def reset_after_lose(level, eatman, ghosts, fires):
+def reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits):
     global gameState
 
     gameState = GAME_STATE_NORMAL
@@ -1411,8 +1567,13 @@ def reset_after_lose(level, eatman, ghosts, fires):
                 del ghost.freq_modifier[key]
 
     # eliminate all the fires
-    for id in range(len(fires)-1, -1,-1):
+    for id in range(len(fires)-1,-1,-1):
         del fires[id]
+
+    # elinimate fruits
+    for id in range(len(fruits)-1,-1,-1):
+        del fruits[id]
+    level.fruit_lastSpawnTime += pause_duration
     
 
 def draw_game_stats(level, eatman, ghosts):
@@ -1442,7 +1603,7 @@ def draw_game_stats(level, eatman, ghosts):
     # nlifes
     xx = 10
     for ii in range(1,nlifes):
-        DISPLAYSURF.blit(eatman.frames[STATIC], (xx+(ii-1)*34, WINDOW_HEIGHT-2*TILE_HEIGHT))
+        DISPLAYSURF.blit(eatman.frames[RIGHT][3], (xx+(ii-1)*30, WINDOW_HEIGHT-2*TILE_HEIGHT-18))
 
 
 def make_text_image(text, font, color):
@@ -1498,13 +1659,19 @@ def terminate():
 
 
 def show_pause_screen():
+    pause_stime = time.time()
     show_text_screen('PAUSE')
+    pause_duration = time.time()-pause_stime
+    return pause_duration
 
 def show_title_screen():
     show_text_screen('EatMan', color=YELLOW)
 
 def show_lose_screen():
+    pause_stime = time.time()
     show_text_screen('Lose')
+    pause_duration = time.time()-pause_stime
+    return pause_duration
 
 def show_gameover_screen():
     show_text_screen('Game Over')
@@ -1518,7 +1685,7 @@ def save_hiscore(score):
 
 def main():
 
-    global gameState, score, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS, nlifes
+    global gameState, score, score_reward, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS, nlifes
 
     pygame.init()
     CLOCK_FPS = pygame.time.Clock()
@@ -1536,6 +1703,8 @@ def main():
     resource.load_tiles()
     resource.load_sounds()
     resource.load_sprites()
+
+    score_reward = config.get('Game','iscorereward')
 
     iLevel = 1 if len(sys.argv)==1 else int(sys.argv[1])
     iLevel_start = iLevel
@@ -1592,6 +1761,12 @@ def run_game(iLevel):
     # The fires
     fires = []
 
+    # the flashing text notices
+    ftexts = []
+
+    # The fruit
+    fruits = []
+
     moveLeft  = False
     moveRight = False
     moveUp    = False
@@ -1640,9 +1815,7 @@ def run_game(iLevel):
                     gameState = GAME_STATE_RESTART
 
                 elif event.key == K_ESCAPE:
-                    pause_stime = time.time()
-                    show_pause_screen()
-                    pause_duration = time.time()-pause_stime
+                    pause_duration = show_pause_screen()
                     # re-calculate important timers
                     # eatman
                     eatman.lastSlayerTime += pause_duration
@@ -1661,6 +1834,10 @@ def run_game(iLevel):
                     # objects
                     for fire in fires:
                         fire.stime += pause_duration
+                    for ftext in ftexts:
+                        ftext.stime += pause_duration
+                    for fruit in fruits:
+                        fruit.stime += pause_duration
 
 
         # Always change the facing direction when eatman is idle.
@@ -1699,19 +1876,35 @@ def run_game(iLevel):
             for ghost in ghosts:
                 ghost.make_move(level, eatman, fires)
 
+            # Fruit
+            for id in range(len(fruits)-1,-1,-1):
+                if fruits[id].is_expired():
+                    del fruits[id]
+                else:
+                    fruits[id].make_move(level)
+            if len(fruits)==0 and time.time()-level.fruit_lastSpawnTime > level.fruit_interval:
+                fruits.append(Fruit(level))
+                level.fruit_lastSpawnTime = time.time()
+
             # Check if anything is hit
-            gameState = check_hit(level, eatman, ghosts, fires)
+            gameState = check_hit(level, eatman, ghosts, fires, fruits, ftexts)
 
 
         # Start the drawing
         level.draw(DISPLAYSURF)
 
+        # the fires
         for id in range(len(fires)-1, -1, -1):
             if fires[id].is_expired():
-                del(fires[id]) 
+                del fires[id] 
             else:
                 fires[id].animate(DISPLAYSURF)
 
+        # fruit
+        for fruit in fruits:
+            fruit.draw(DISPLAYSURF)
+
+        # ghosts
         for ghost in ghosts:
             ghost.draw(DISPLAYSURF, eatman)
 
@@ -1727,10 +1920,17 @@ def run_game(iLevel):
                     time.sleep(0.5)
                     loopit = False
                 else:
-                    show_lose_screen()
-                    reset_after_lose(level, eatman, ghosts, fires)
+                    pause_duration = show_lose_screen()
+                    reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits)
         else:
             eatman.draw(DISPLAYSURF)
+
+        # the flashing text notices
+        for id in range(len(ftexts)-1,-1,-1):
+            if ftexts[id].is_expired():
+                del ftexts[id]
+            else:
+                ftexts[id].animate(DISPLAYSURF)
 
         # Win?
         if gameState == GAME_STATE_WIN:

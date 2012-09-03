@@ -9,6 +9,7 @@ TILE_FIXED_BARRIER      = '*'
 TILE_VACANCY            = ' '
 TILE_FIXED_PATH         = '#'
 TILE_EATMAN             = 'e'
+TILE_TELEPORT           = '$'
 
 
 class Tile(object):
@@ -334,25 +335,53 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
 
     # The ghost chamber
     ghost_chamber = [
-            list('###3###'), 
-            list('#**=**#'), 
-            list('#*012*#'), 
-            list('#*****#'),
-            list('#######')
+            '*@@#@#@@*',
+            '*###3###*', 
+            '*#**=**#*', 
+            '##*012*##', 
+            '*#*****#*',
+            '*#######*',
+            '*#@@@@@#*',
             ]
     if rc %2 == 0: # even row center
-        rowrange = [rc-3, rc-2, rc-1, rc, rc+1]
+        rowrange = [rc-4,rc-3, rc-2, rc-1, rc, rc+1,rc+2]
     else:
-        rowrange = [rc-2, rc-1, rc, rc+1, rc+2]
+        rowrange = [rc-3,rc-2, rc-1, rc, rc+1, rc+2,rc+3]
     if cc %2 == 0: # even column center
-        colrange = [cc-3, cc-2, cc-1, cc, cc+1, cc+2, cc+3]
+        colrange = [cc-4, cc-3, cc-2, cc-1, cc, cc+1, cc+2, cc+3, cc+4]
     else:
-        colrange = [cc-4, cc-3, cc-2, cc-1, cc, cc+1, cc+2]
+        colrange = [cc-5, cc-4, cc-3, cc-2, cc-1, cc, cc+1, cc+2, cc+3]
 
     for row in rowrange:
         for col in colrange:
             symbol = ghost_chamber[row-rowrange[0]][col-colrange[0]]
             tiles[(row,col)].symbol = symbol
+
+    # The tunnel placeholder
+    tunnel_left = [
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            ]
+    tunnel_right = [
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            '*****',
+            ]
+    for row in rowrange:
+        for col in range(5):
+            tiles[(row,col)].symbol = tunnel_left[row-rowrange[0]][col]
+            tiles[(row,ncols-1-col)].symbol = tunnel_right[row-rowrange[0]][4-col]
+
+
 
     # The eatman's location
     if rc % 2 == 0:
@@ -546,6 +575,30 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
             cells_stack.append(cell_1)
             cells_stack.append(cell_2)
             print 'break', breakpos_1, breakpos_2
+
+    # make the tunnel open
+    tunnel_left = [
+            '*****',
+            '####*',
+            '*****',
+            '$####',
+            '*****',
+            '####*',
+            '*****',
+            ]
+    tunnel_right = [
+            '*****',
+            '*####',
+            '*****',
+            '####$',
+            '*****',
+            '*####',
+            '*****',
+            ]
+    for row in rowrange:
+        for col in range(5):
+            tiles[(row,col)].symbol = tunnel_left[row-rowrange[0]][col]
+            tiles[(row,ncols-1-col)].symbol = tunnel_right[row-rowrange[0]][4-col]
 
 
     # print the maze
