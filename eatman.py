@@ -12,6 +12,10 @@ A Pac-Man clone with improved game mechanics.
 ywangd@gmail.com
 '''
 
+# TODO
+# 1. Buff icon flash
+# 2. bomb animation
+
 
 def we_are_frozen():
     """Returns whether we are frozen via py2exe.
@@ -1268,10 +1272,10 @@ def apply_buff(buff, eatman, ghosts, fires):
 
     if buff == BUFF_SLOW:
         for ghost in ghosts:
-            ghost.add_freq_modifier(5.0, 4.0) # slow 5 times for 4 seconds
+            ghost.add_freq_modifier(config.get('Buff','fslow_rate'), config.get('Buff','fslow_duration')) 
     elif buff == BUFF_FREEZE:
         for ghost in ghosts:
-            ghost.add_freq_modifier(99999.9, 4.0) # slow 99999.9 times for 4 seconds
+            ghost.add_freq_modifier(99999.9, config.get('Buff','ffreeze_duration')) # slow 99999.9 times
     elif buff == BUFF_BOMB: # randomly blow up a ghost
         ghost_to_die = []
         for ghost in ghosts:
@@ -1281,7 +1285,7 @@ def apply_buff(buff, eatman, ghosts, fires):
             ghost_to_die = random.choice(ghost_to_die)
             ghost_to_die.mode = ghost.MODE_DYING
     elif buff == BUFF_SPEED:
-        eatman.add_freq_modifier(0.50, 5.0) # twice faster for 5 seconds
+        eatman.add_freq_modifier(config.get('Buff','fspeed_rate'), config.get('Buff','fspeed_duration')) 
 
 
 
