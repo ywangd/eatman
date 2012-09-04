@@ -377,6 +377,7 @@ class Level(object):
         self.mazeSurf = DISPLAYSURF.copy()
         # The dynamic objects including beans
         self.dynamicObjects = {}
+        self.uvpos_beans = []
 
         # Analyze the data for tile information
         for v in range(self.nrows):
@@ -411,6 +412,8 @@ class Level(object):
                 elif tileRes is not None and tileRes[0][0:4] == 'bean':
                     img = resource.tiles[tileRes[0]]
                     self.dynamicObjects[uv_to_key([u, v])] = Bean([u, v], img)
+                    # get all bean locations
+                    self.uvpos_beans.append([u,v])
 
         # draw other static objects
         # level
@@ -438,22 +441,21 @@ class Level(object):
 
 
         # The energy bar
-        quarter_width = int(WINDOW_WIDTH/4.0)
-        rect = [quarter_width, WINDOW_HEIGHT - 2*TILE_HEIGHT, quarter_width*2, TILE_HEIGHT]
-        pygame.draw.rect(self.mazeSurf, BLUE, rect)
-        rect[0] += 3
-        rect[1] += 3
-        rect[2] -= 6
-        rect[3] -= 6
-        self.rect_energy = rect
-        pygame.draw.rect(self.mazeSurf, BLACK, rect)
+        #quarter_width = int(WINDOW_WIDTH/4.0)
+        #rect = [quarter_width, WINDOW_HEIGHT - 2*TILE_HEIGHT, quarter_width*2, TILE_HEIGHT]
+        #pygame.draw.rect(self.mazeSurf, BLUE, rect)
+        #rect[0] += 3
+        #rect[1] += 3
+        #rect[2] -= 6
+        #rect[3] -= 6
+        #self.rect_energy = rect
+        #pygame.draw.rect(self.mazeSurf, BLACK, rect)
         
         self.energyLevel = [0]
         self.energyLevel.append(int(self.nbeans/3))
         self.energyLevel.append(int(self.nbeans/1.2))
         self.energyLevel.append(self.nbeans*2)
         self.idx_energyLevel = 1
-
         self.energy_decay_time = 2.0
 
 
@@ -618,6 +620,7 @@ class Explosion(object):
         self.xypos = copy.copy(xypos)
         self.active = True
         self.lastAnimTime = time.time()
+        resource.sounds['explosion'].play()
 
     def animate(self, DISPLAYSURF):
         if not self.active:
@@ -736,6 +739,87 @@ class Fruit(object):
         else:
             return False
 
+
+class Buff(object):
+
+    INSIDE_MAP = 0
+    OUTSIDE_MAP = 1
+
+    def __init__(self):
+        self.uvpos = [-1, -1]
+        self.xypos = [0, 0]
+        self.stime = time.time()
+        self.duration = config.get('Buff','fduration')
+        self.active = False
+
+    def start(self, level):
+        self.active = True
+        self.state = Buff.INSIDE_MAP
+        self.uvpos = random.choice(level.uvpos_beans)
+        self.xypos = uv_to_xy(self.uvpos)
+        self.duration = config.get('Buff','fduration')
+        self.type = level.buffs[level.idx_energyLevel-1]
+        self.surf = resource.buffs[level.buffs[level.idx_energyLevel-1]]
+        level.idx_energyLevel += 1
+        self.stime = time.time()
+
+    def apply(self, eatman, ghosts, fires, explosion):
+        if self.type == BUFF_SLOW:
+            for ghost in ghosts:
+                ghost.add_freq_modifier(
+                        config.get('Buff','fslow_rate'), 
+                        config.get('Buff','fslow_duration')) 
+            self.duration = config.get('Buff','fslow_duration')
+        elif self.type == BUFF_FREEZE:
+            for ghost in ghosts: # slow 99999.9 times
+                ghost.add_freq_modifier(
+                        99999.9, config.get('Buff','ffreeze_duration')) 
+            self.duration = config.get('Buff','ffreeze_duration')
+        elif self.type == BUFF_BOMB: # randomly blow up a ghost
+            ghost_to_die = []
+            for ghost in ghosts:
+                if ghost.mode != Ghost.MODE_DYING or ghost.mode != Ghost.MODE_DEAD:
+                    ghost_to_die.append(ghost)
+            if len(ghost_to_die) > 0:
+                ghost_to_die = random.choice(ghost_to_die)
+                ghost_to_die.mode = Ghost.MODE_DYING
+                ghost_to_die.add_freq_modifier(
+                        99999.9, len(explosion.frame_sequence)*explosion.animFreq, 
+                        exclude_modes=[])
+                explosion.start(ghost_to_die.xypos)
+            self.duration = 0.0
+            self.active = False
+        elif self.type == BUFF_SPEED:
+            eatman.add_freq_modifier(
+                    config.get('Buff','fspeed_rate'), 
+                    config.get('Buff','fspeed_duration')) 
+            self.duration = config.get('Buff','fspeed_duration')
+
+        self.state = Buff.OUTSIDE_MAP
+        self.stime = time.time()
+        self.uvpos = [-1, -1]
+        self.xypos = [WINDOW_WIDTH-TILE_WIDTH-10, WINDOW_HEIGHT-1*TILE_HEIGHT-18]
+
+
+    def draw(self, DISPLAYSURF):
+        if not self.active:
+            return
+
+        if self.state == Buff.INSIDE_MAP and round(time.time()*10) % 5 == 0:
+            pygame.draw.rect(DISPLAYSURF, WHITE, 
+                    self.xypos + [TILE_WIDTH, TILE_HEIGHT], 1)
+
+        if time.time()-self.stime > self.duration - 1.5:
+            if round(time.time()*10) % 2 == 0:
+                DISPLAYSURF.blit(self.surf, self.xypos)
+        else:
+            DISPLAYSURF.blit(self.surf, self.xypos)
+
+    def is_expired(self):
+        if time.time()-self.stime > self.duration:
+            return True
+        else:
+            return False
 
 class Ghost(object):
 
@@ -957,13 +1041,16 @@ class Ghost(object):
         return False
 
     # all modifier will be used in multiplications
-    def add_freq_modifier(self, value, duration):
-        if self.mode != Ghost.MODE_DEAD and self.mode != Ghost.MODE_DYING:
+    def add_freq_modifier(self, value, duration, exclude_modes=None):
+        if exclude_modes is None:
+            exclude_modes = [Ghost.MODE_DYING, Ghost.MODE_DEAD]
+        if self.mode not in exclude_modes:
             stime = time.time()
             name = str(random.random()) + str(stime)
             self.freq_modifier[name] = (value, stime, duration)
             return name
         return None
+
 
     def draw(self, DISPLAYSURF, eatman):
 
@@ -1042,13 +1129,14 @@ class Ghost(object):
             if self.mode == Ghost.MODE_FREIGHTEN:
                 animFreq *= 3.0
 
-            # Modify the animate frequency through the modifiers
-            for key in self.freq_modifier.keys():
-                value, stime, duration = self.freq_modifier[key]
-                if duration < 0 or time.time()-stime < duration:
-                    animFreq *= value
-                else:
-                    del self.freq_modifier[key]
+        # Modify the animate frequency through the modifiers
+        for key in self.freq_modifier.keys():
+            value, stime, duration = self.freq_modifier[key]
+            if duration < 0 or time.time()-stime < duration:
+                animFreq *= value
+            else:
+                del self.freq_modifier[key]
+
 
         # If it is in middle of an animation and its time to refresh a new frame 
         # keep doing it till the cycle is done.
@@ -1091,6 +1179,7 @@ class Ghost(object):
                 if self.uvpos_dyingto == xy_to_uv(self.xypos):
                     self.mode = Ghost.MODE_DEAD
                     self.pathway = ''
+                    self.freq_modifier = {} # clear all freq modifier
                     self.lastDeadTime = time.time()
                 else:
                     self.pathway = simplepath(level, self, self.uvpos_dyingto)
@@ -1296,27 +1385,6 @@ class Bean(object):
         self.uvpos = uvpos
         self.image = image
 
-def apply_buff(buff, eatman, ghosts, fires, explosion):
-
-    if buff == BUFF_SLOW:
-        for ghost in ghosts:
-            ghost.add_freq_modifier(config.get('Buff','fslow_rate'), config.get('Buff','fslow_duration')) 
-    elif buff == BUFF_FREEZE:
-        for ghost in ghosts:
-            ghost.add_freq_modifier(99999.9, config.get('Buff','ffreeze_duration')) # slow 99999.9 times
-    elif buff == BUFF_BOMB: # randomly blow up a ghost
-        ghost_to_die = []
-        for ghost in ghosts:
-            if ghost.mode != Ghost.MODE_DYING or ghost.mode != Ghost.MODE_DEAD:
-                ghost_to_die.append(ghost)
-        if len(ghost_to_die) > 0:
-            ghost_to_die = random.choice(ghost_to_die)
-            ghost_to_die.mode = Ghost.MODE_DYING
-            explosion.start(ghost_to_die.xypos)
-    elif buff == BUFF_SPEED:
-        eatman.add_freq_modifier(config.get('Buff','fspeed_rate'), config.get('Buff','fspeed_duration')) 
-
-
 
 def randpath(level, ghost):
     moveto = [UP, LEFT, DOWN, RIGHT]
@@ -1430,7 +1498,7 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
         return False
 
 
-def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion):
+def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
 
     global score, score_reward, nlifes
 
@@ -1511,9 +1579,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion):
             level.idx_beansound = 0
         # check if energy is full
         if eatman.energy > level.energyLevel[level.idx_energyLevel]:
-            buff = level.buffs[level.idx_energyLevel-1]
-            apply_buff(buff, eatman, ghosts, fires, explosion)
-            level.idx_energyLevel += 1
+            buff.start(level)
         # win if beans all consumed
         if level.nbeans == 0:
             return GAME_STATE_WIN
@@ -1538,12 +1604,14 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion):
                 ghost.pathway = get_opposite_direction(ghost.direction)
         # check if energy is full
         if eatman.energy > level.energyLevel[level.idx_energyLevel]:
-            buff = level.buffs[level.idx_energyLevel-1]
-            apply_buff(buff, eatman, ghosts, fires, explosion)
-            level.idx_energyLevel += 1
+            buff.start(level)
         # win if beans all consumed
         if level.nbeans == 0:
             return GAME_STATE_WIN
+
+    # hit a buff
+    if buff.active and buff.uvpos == [u, v]:
+        buff.apply(eatman, ghosts, fires, explosion)
     
     # add life reward
     if score >= score_reward:
@@ -1562,7 +1630,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion):
     return gameState
 
 
-def reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits):
+def reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits, buff):
     global gameState
 
     gameState = GAME_STATE_NORMAL
@@ -1607,6 +1675,9 @@ def reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits):
     for id in range(len(fruits)-1,-1,-1):
         del fruits[id]
     level.fruit_lastSpawnTime += pause_duration
+
+    # eliminate buff (the not eaten ones)
+    buff.active = False
     
 
 def draw_game_stats(level, eatman, ghosts):
@@ -1624,19 +1695,20 @@ def draw_game_stats(level, eatman, ghosts):
     DISPLAYSURF.blit(theSurf, theRect)
 
     # the energy bar
-    energy = eatman.energy - level.energyLevel[level.idx_energyLevel-1] 
-    percent = energy*1.0/(level.energyLevel[level.idx_energyLevel] 
-            - level.energyLevel[level.idx_energyLevel-1])
-    rect = copy.copy(level.rect_energy)
-    DISPLAYSURF.blit(resource.buffs[level.buffs[level.idx_energyLevel-1]], 
-            [rect[0]+rect[2]+10, rect[1]-2])
-    rect[2] = int(level.rect_energy[2]*percent)
-    pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
+    #energy = eatman.energy - level.energyLevel[level.idx_energyLevel-1] 
+    #percent = energy*1.0/(level.energyLevel[level.idx_energyLevel] 
+    #        - level.energyLevel[level.idx_energyLevel-1])
+    #rect = copy.copy(level.rect_energy)
+    #rect[2] = int(level.rect_energy[2]*percent)
+    #pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
+    #DISPLAYSURF.blit(resource.buffs[level.buffs[level.idx_energyLevel-1]], 
+    #        (WINDOW_WIDTH/2, WINDOW_HEIGHT-TILE_HEIGHT))
 
     # nlifes
     xx = 10
     for ii in range(1,nlifes):
-        DISPLAYSURF.blit(eatman.frames[RIGHT][3], (xx+(ii-1)*30, WINDOW_HEIGHT-2*TILE_HEIGHT-18))
+        DISPLAYSURF.blit(eatman.frames[RIGHT][3], 
+                (xx+(ii-1)*30, WINDOW_HEIGHT-1*TILE_HEIGHT-18))
 
 
 def make_text_image(text, font, color):
@@ -1775,7 +1847,7 @@ def run_game(iLevel):
 
     # Resize the window according to the maze size
     WINDOW_WIDTH = level.ncols*TILE_WIDTH
-    WINDOW_HEIGHT = (level.nrows+5)*TILE_HEIGHT
+    WINDOW_HEIGHT = (level.nrows+4)*TILE_HEIGHT
     pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 
     # recolor the tiles according to the level requirement
@@ -1803,6 +1875,9 @@ def run_game(iLevel):
 
     # Explosion
     explosion = Explosion()
+
+    # The buff
+    buff = Buff()
 
     moveLeft  = False
     moveRight = False
@@ -1925,7 +2000,8 @@ def run_game(iLevel):
                 level.fruit_lastSpawnTime = time.time()
 
             # Check if anything is hit
-            gameState = check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion)
+            gameState = check_hit(level, eatman, ghosts, 
+                    fires, fruits, ftexts, explosion, buff)
 
 
         # Start the drawing
@@ -1945,6 +2021,12 @@ def run_game(iLevel):
         for fruit in fruits:
             fruit.draw(DISPLAYSURF)
 
+        # buff
+        if buff.is_expired():
+            buff.active = False
+        else:
+            buff.draw(DISPLAYSURF)
+
         # ghosts
         for ghost in ghosts:
             ghost.draw(DISPLAYSURF, eatman)
@@ -1962,7 +2044,7 @@ def run_game(iLevel):
                     loopit = False
                 else:
                     pause_duration = show_lose_screen()
-                    reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits)
+                    reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits, buff)
         else:
             eatman.draw(DISPLAYSURF)
 
