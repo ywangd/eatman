@@ -1757,7 +1757,7 @@ def show_text_screen(text, color=WHITE, addtext='Press Enter to play.'):
 
     # Draw the additional "Press a key to play." text.
     pressKeySurf, pressKeyRect = make_text_image(addtext, BASICFONT, WHITE)
-    pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 150)
+    pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 180)
     DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
 
     while check_for_key_press() == None:
