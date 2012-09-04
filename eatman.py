@@ -38,7 +38,7 @@ def module_path():
 SRCDIR                  = module_path()
 
 FPS                     = 200
-FPS_LOW                 = 10
+FPS_LOW                 = 60
 
 WINDOW_WIDTH            = 504
 WINDOW_HEIGHT           = 609
@@ -1683,6 +1683,7 @@ def check_for_key_press():
             continue
         if event.key == K_RETURN:
             return event.key
+    pygame.event.clear()
     return None
 
 def terminate():
@@ -1874,6 +1875,7 @@ def run_game(iLevel):
                         ftext.stime += pause_duration
                     for fruit in fruits:
                         fruit.stime += pause_duration
+                    level.fruit_lastSpawnTime += pause_duration
 
 
         # Always change the facing direction when eatman is idle.
@@ -1982,7 +1984,7 @@ def run_game(iLevel):
         # Update the actual screen image
         pygame.display.update()
 
-        CLOCK_FPS.tick(FPS)
+        #CLOCK_FPS.tick(FPS)
 
 
 if __name__ == '__main__':
