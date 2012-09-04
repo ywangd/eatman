@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import sys, random
+from string import maketrans
 from pprint import pprint
 
 TILE_BEAN               = '.'
@@ -168,16 +169,16 @@ def repair_corner_fixed_path(tiles, fpath, tile_1, tile_2, tile_3):
             row_cand, col_cand = cand.pos
             emptys = [TILE_VACANCY, TILE_BEAN, TILE_FIXED_PATH]
             if tiles[(row_cand-1, col_cand)].symbol in emptys:
-                if get_nwalls_surrounded(tiles, (row_cand-1, col_cand)) >= 2:
+                if count_nwalls_surrounded(tiles, (row_cand-1, col_cand)) >= 2:
                     continue
             if tiles[(row_cand+1, col_cand)].symbol in emptys:
-                if get_nwalls_surrounded(tiles, (row_cand+1, col_cand)) >= 2:
+                if count_nwalls_surrounded(tiles, (row_cand+1, col_cand)) >= 2:
                     continue
             if tiles[(row_cand, col_cand-1)].symbol in emptys:
-                if get_nwalls_surrounded(tiles, (row_cand, col_cand-1)) >= 2:
+                if count_nwalls_surrounded(tiles, (row_cand, col_cand-1)) >= 2:
                     continue
             if tiles[(row_cand, col_cand+1)].symbol in emptys:
-                if get_nwalls_surrounded(tiles, (row_cand, col_cand+1)) >= 2:
+                if count_nwalls_surrounded(tiles, (row_cand, col_cand+1)) >= 2:
                     continue
 
             # do not make blocky walls
@@ -206,7 +207,7 @@ def repair_corner_fixed_path(tiles, fpath, tile_1, tile_2, tile_3):
             break
 
 
-def get_nwalls_surrounded(tiles, pos):
+def count_nwalls_surrounded(tiles, pos):
     row, col = pos
     nwalls = 0
     if tiles[(row-1, col)].symbol in [TILE_WALL, TILE_FIXED_BARRIER]:
@@ -230,170 +231,247 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
     row, col = wall.pos # this is our starting anchor and we need to find the ending one
 
     # possible links from 4 directions
-    UP          = (row-2, col)
-    DOWN        = (row+2, col)
-    LEFT        = (row, col-2)
-    RIGHT       = (row, col+2)
+    POS_UP          = (row-2, col)
+    POS_DOWN        = (row+2, col)
+    POS_LEFT        = (row, col-2)
+    POS_RIGHT       = (row, col+2)
     candidates = []
     # Get possible link anchor from all 4 directions. 
     # The possible links must be between walls.
     possible_anchor = [TILE_WALL]
-    if tiles[UP].symbol in possible_anchor:
-        candidates.append(UP)
-    if tiles[DOWN].symbol in possible_anchor:
-        candidates.append(DOWN)
-    if tiles[LEFT].symbol in possible_anchor:
-        candidates.append(LEFT)
-    if tiles[RIGHT].symbol in possible_anchor:
-        candidates.append(RIGHT)
+    if tiles[POS_UP].symbol in possible_anchor:
+        candidates.append(POS_UP)
+    if tiles[POS_DOWN].symbol in possible_anchor:
+        candidates.append(POS_DOWN)
+    if tiles[POS_LEFT].symbol in possible_anchor:
+        candidates.append(POS_LEFT)
+    if tiles[POS_RIGHT].symbol in possible_anchor:
+        candidates.append(POS_RIGHT)
 
     # The links cannot be built through an existing wall or
     # a fixed path or the eatman
     invalid_passage = [TILE_WALL, TILE_FIXED_PATH, TILE_EATMAN]
-    if UP in candidates and tiles[(row-1,col)].symbol in invalid_passage:
-        candidates.remove(UP)
-    if DOWN in candidates and tiles[(row+1,col)].symbol in invalid_passage:
-        candidates.remove(DOWN)
-    if LEFT in candidates and tiles[(row,col-1)].symbol in invalid_passage:
-        candidates.remove(LEFT)
-    if RIGHT in candidates and tiles[(row,col+1)].symbol in invalid_passage:
-        candidates.remove(RIGHT)
+    if POS_UP in candidates and tiles[(row-1,col)].symbol in invalid_passage:
+        candidates.remove(POS_UP)
+    if POS_DOWN in candidates and tiles[(row+1,col)].symbol in invalid_passage:
+        candidates.remove(POS_DOWN)
+    if POS_LEFT in candidates and tiles[(row,col-1)].symbol in invalid_passage:
+        candidates.remove(POS_LEFT)
+    if POS_RIGHT in candidates and tiles[(row,col+1)].symbol in invalid_passage:
+        candidates.remove(POS_RIGHT)
 
     # Check if any link would make a vacancy become surrounded by 3 
     # or more walls. We need to disqualify them. 
     # The vacancy are those adjacent to the link's passage
-    nwalls_ul = get_nwalls_surrounded(tiles, (row-1, col-1))  # upper left
-    nwalls_ur = get_nwalls_surrounded(tiles, (row-1, col+1))  # upper right
-    nwalls_ll = get_nwalls_surrounded(tiles, (row+1, col-1))  # lower left
-    nwalls_lr = get_nwalls_surrounded(tiles, (row+1, col+1))  # lower right
+    nwalls_ul = count_nwalls_surrounded(tiles, (row-1, col-1))  # upper left
+    nwalls_ur = count_nwalls_surrounded(tiles, (row-1, col+1))  # upper right
+    nwalls_ll = count_nwalls_surrounded(tiles, (row+1, col-1))  # lower left
+    nwalls_lr = count_nwalls_surrounded(tiles, (row+1, col+1))  # lower right
 
-    if UP in candidates:
+    if POS_UP in candidates:
         if nwalls_ul >= 2 or nwalls_ur >= 2:
-            candidates.remove(UP)
+            candidates.remove(POS_UP)
 
-    if DOWN in candidates:
+    if POS_DOWN in candidates:
         if nwalls_ll >= 2 or nwalls_lr >= 2:
-            candidates.remove(DOWN)
+            candidates.remove(POS_DOWN)
 
-    if LEFT in candidates:
+    if POS_LEFT in candidates:
         if nwalls_ul >= 2 or nwalls_ll >= 2:
-            candidates.remove(LEFT)
+            candidates.remove(POS_LEFT)
 
-    if RIGHT in candidates:
+    if POS_RIGHT in candidates:
         if nwalls_ur >=2 or nwalls_lr >= 2:
-            candidates.remove(RIGHT)
+            candidates.remove(POS_RIGHT)
 
-    # TODO: this part does not really work as intended
-    # make sure the walls do not form a C shape
-    # walk the cell and find all the wall its connected
+
+    # make sure the walls do not form a U shape
+    # The theory is to walk from end to end and see if the walk path
+    # is in any of the uld, urd, etc, which are the signs of U shape
+    UP = 'u'
+    DOWN = 'd'
+    LEFT = 'l'
+    RIGHT = 'r'
+    transtable = maketrans('udlr','durl')
+
+    # walk of the given node
     walk_stack = []
-    walk_stack.append(wall)
     walk_visited = []
+    walk_info = {}
+    walk_end = []
+
+    # find the end node
+    walk_stack.append(wall) 
+    walk_info[wall.pos] = (None, '') # previous node, direction
     while len(walk_stack) > 0:
+
         c_cell = walk_stack.pop()
-        walk_visited.append(c_cell)
         c_row, c_col = c_cell.pos
+        walk_visited.append(c_cell)
+        is_middle_node = False
+
+        # do not add any outter walls and they are not end node either
         if c_row <=0 or c_row >= nrows-1 or c_col <= 0 or c_col >= ncols-1:
             continue
+
         if c_row-1 > 0:
             up_cell = tiles[(c_row-1,c_col)]
-            if up_cell.symbol == TILE_WALL and up_cell not in walk_visited and up_cell not in walk_stack:
+            if up_cell.symbol == TILE_WALL \
+                    and up_cell not in walk_visited and up_cell not in walk_stack:
                 walk_stack.append(up_cell)
+                walk_info[up_cell.pos] = (c_cell, UP)
+                is_middle_node = True
 
         if c_row+1 < nrows-1:
             down_cell = tiles[(c_row+1,c_col)]
-            if down_cell.symbol == TILE_WALL and down_cell not in walk_visited and down_cell not in walk_stack:
+            if down_cell.symbol == TILE_WALL \
+                    and down_cell not in walk_visited and down_cell not in walk_stack:
                 walk_stack.append(down_cell)
+                walk_info[down_cell.pos] = (c_cell, DOWN)
+                is_middle_node = True
 
         if c_col-1 > 0:
             left_cell = tiles[(c_row,c_col-1)]
-            if left_cell.symbol == TILE_WALL and left_cell not in walk_visited and left_cell not in walk_stack:
+            if left_cell.symbol == TILE_WALL \
+                    and left_cell not in walk_visited and left_cell not in walk_stack:
                 walk_stack.append(left_cell)
+                walk_info[left_cell.pos] = (c_cell, LEFT)
+                is_middle_node = True
 
         if c_col+1 < ncols-1:
             right_cell = tiles[(c_row,c_col+1)]
-            if right_cell.symbol == TILE_WALL and right_cell not in walk_visited and right_cell not in walk_stack:
+            if right_cell.symbol == TILE_WALL \
+                    and right_cell not in walk_visited and right_cell not in walk_stack:
                 walk_stack.append(right_cell)
-    walk_visited.remove(wall)
+                walk_info[right_cell.pos] = (c_cell, RIGHT)
+                is_middle_node = True
 
+        if not is_middle_node:
+            walk_end.append(c_cell)
+
+    # reconstruct the path from the end
+    walk_path = {}
+    for wend in walk_end:
+        p_cell, direction = walk_info[wend.pos]
+        walk_path[wend.pos] = direction
+        c_cell = p_cell
+        while c_cell is not None:
+            p_cell, direction = walk_info[c_cell.pos]
+            walk_path[wend.pos] += direction
+            c_cell = p_cell
+        # reverse the path to make it from end to start
+        walk_path[wend.pos] = walk_path[wend.pos].translate(transtable)
+
+
+    # walk of the candidate node
     for ii in range(len(candidates)-1,-1,-1):
         cand = candidates[ii]
         walk_stack_cand = []
         walk_visited_cand = []
+        walk_info_cand = {}
+        walk_end_cand = []
+
+        # find the ending node
         walk_stack_cand.append(tiles[cand])
+        walk_info_cand[cand] = (None, '')
         while len(walk_stack_cand) > 0:
+
             c_cell = walk_stack_cand.pop()
-            walk_visited_cand.append(c_cell)
             c_row, c_col = c_cell.pos
+            walk_visited_cand.append(c_cell)
+            is_middle_node = False
+
             if c_row <=0 or c_row >= nrows-1 or c_col <= 0 or c_col >= ncols-1:
                 continue
+
             if c_row-1 > 0:
                 up_cell = tiles[(c_row-1,c_col)]
                 if up_cell.symbol == TILE_WALL \
                         and up_cell not in walk_visited_cand and up_cell not in walk_stack_cand:
                     walk_stack_cand.append(up_cell)
+                    walk_info_cand[up_cell.pos] = (c_cell, UP)
+                    is_middle_node = True
 
             if c_row+1 < nrows-1:
                 down_cell = tiles[(c_row+1,c_col)]
                 if down_cell.symbol == TILE_WALL \
                         and down_cell not in walk_visited_cand and down_cell not in walk_stack_cand:
                     walk_stack_cand.append(down_cell)
+                    walk_info_cand[down_cell.pos] = (c_cell, DOWN)
+                    is_middle_node = True
 
             if c_col-1 > 0:
                 left_cell = tiles[(c_row,c_col-1)]
                 if left_cell.symbol == TILE_WALL \
                         and left_cell not in walk_visited_cand and left_cell not in walk_stack_cand:
                     walk_stack_cand.append(left_cell)
+                    walk_info_cand[left_cell.pos] = (c_cell, LEFT)
+                    is_middle_node = True
 
             if c_col+1 < ncols-1:
                 right_cell = tiles[(c_row,c_col+1)]
                 if right_cell.symbol == TILE_WALL \
                         and right_cell not in walk_visited_cand and right_cell not in walk_stack_cand:
                     walk_stack_cand.append(right_cell)
-        walk_visited_cand.remove(tiles[cand])
+                    walk_info_cand[right_cell.pos] = (c_cell, RIGHT)
+                    is_middle_node = True
 
+            if not is_middle_node:
+                walk_end_cand.append(c_cell)
+
+
+        # reconstruct the path to the ending nodes
+        walk_path_cand = {}
+        for wend in walk_end_cand:
+            p_cell, direction = walk_info_cand[wend.pos]
+            walk_path_cand[wend.pos] = direction
+            c_cell = p_cell
+            while c_cell is not None:
+                p_cell, direction = walk_info_cand[c_cell.pos]
+                walk_path_cand[wend.pos] += direction
+                c_cell = p_cell
+            # reverse the order of the path to make it from start to the end
+            walk_path_cand[wend.pos] = walk_path_cand[wend.pos][::-1]
+
+
+        # check if any of the end nodes make U shape walls
         disqualified = False
-        for cell in walk_visited:
-            if cand == UP and cell.pos[0] < wall.pos[0]:
-                disqualified = True
-                del candidates[ii]
-                break
-            elif cand == DOWN and cell.pos[0] > wall.pos[0]:
-                disqualified = True
-                del candidates[ii]
-                break
-            elif cand == LEFT and cell.pos[1] < wall.pos[1]:
-                disqualified = True
-                del candidates[ii]
-                break
-            elif cand == RIGHT and cell.pos[1] > wall.pos[1]:
-                disqualified = True
-                del candidates[ii]
-                break
+        for key1 in walk_path.keys():
+            for key2 in walk_path_cand.keys():
+                if cand ==  POS_UP:
+                    combpath = walk_path[key1] + UP + walk_path_cand[key2]
+                elif cand ==  POS_DOWN:
+                    combpath = walk_path[key1] + DOWN + walk_path_cand[key2]
+                elif cand ==  POS_LEFT:
+                    combpath = walk_path[key1] + LEFT + walk_path_cand[key2]
+                elif cand ==  POS_RIGHT:
+                    combpath = walk_path[key1] + RIGHT + walk_path_cand[key2]
 
-        if disqualified:
-            continue
+                thepath = combpath[0]
+                # eliminate the repeated chars
+                for chr in combpath[1:]:
+                    if thepath[-1] != chr:
+                        thepath += chr
 
-        for cell in walk_visited_cand:
-            if cand == UP and cell.pos[0] > cand[0]:
-                disqualified = True
-                del candidates[ii]
-                break
-            elif cand == DOWN and cell.pos[0] < cand[0]:
-                disqualified = True
-                del candidates[ii]
-                break
-            elif cand == LEFT and cell.pos[1] > cand[1]:
-                disqualified = True
-                del candidates[ii]
-                break
-            elif cand == RIGHT and cell.pos[1] < cand[1]:
-                disqualified = True
-                del candidates[ii]
+                if thepath.find('urd') >= 0 \
+                        or thepath.find('uld') >= 0 \
+                        or thepath.find('lur') >= 0 \
+                        or thepath.find('ldr') >= 0 \
+                        or thepath.find('dru') >= 0 \
+                        or thepath.find('dlu') >= 0 \
+                        or thepath.find('rdl') >= 0 \
+                        or thepath.find('rul') >= 0:
+
+                    disqualified = True
+                    del candidates[ii]
+                    break
+
+            if disqualified:
                 break
 
 
-    # choose the link randomly
+
+    # now we can choose the link randomly
     if len(candidates) > 0:
         pos_link = random.choice(candidates)
         return tiles[pos_link]
