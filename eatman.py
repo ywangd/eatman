@@ -41,7 +41,7 @@ FPS                     = 200
 FPS_LOW                 = 60
 
 WINDOW_WIDTH            = 504
-WINDOW_HEIGHT           = 609
+WINDOW_HEIGHT           = 600
 
 TILE_WIDTH              = 24
 TILE_HEIGHT             = 24
@@ -2014,9 +2014,6 @@ def run_game(iLevel):
             else:
                 fires[id].animate(DISPLAYSURF)
 
-        # explosion
-        explosion.animate(DISPLAYSURF)
-
         # fruit
         for fruit in fruits:
             fruit.draw(DISPLAYSURF)
@@ -2030,6 +2027,9 @@ def run_game(iLevel):
         # ghosts
         for ghost in ghosts:
             ghost.draw(DISPLAYSURF, eatman)
+
+        # explosion
+        explosion.animate(DISPLAYSURF)
 
         # Draw game state infos
         draw_game_stats(level, eatman, ghosts)
