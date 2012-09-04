@@ -241,6 +241,8 @@ class Resource(object):
 config = Config() # Read the config.ini file
 resource = Resource()
 hiscore = 0
+hsnames = []
+hsvalues = []
 score = 0
 nlifes = 0
 score_reward = 0
@@ -273,6 +275,12 @@ class Level(object):
         self.uvpos_teleport = []
 
         self.fruit_lastSpawnTime = time.time()
+
+        # stats of the this level
+        self.score_pre = score # previous score for calculate score gained this level
+        self.ghost_ate = []
+        self.fruit_ate = []
+        self.buff_ate = []
 
     def load(self, iLevel):
         self.iLevel = iLevel
@@ -430,11 +438,24 @@ class Level(object):
         theSurf, theRect = make_text_image('HI score', BASICFONT, WHITE)
         theRect.topleft = (10, 2)
         self.mazeSurf.blit(theSurf, theRect)
-        global hiscore
+        global hiscore, hsnames, hsvalues
+        hsnames = []
+        hsvalues = []
         try:
-            hiscore = int(open(os.path.join(SRCDIR,'hiscore.txt')).readline())
+            hsfile = open(os.path.join(SRCDIR,'hiscore.txt'))
+            for line in hsfile.readlines():
+                name, value = line.strip().split(',')
+                hsnames.append(name)
+                hsvalues.append(int(value))
         except ValueError:
-            hiscore = 0
+            hsnames.append('')
+            hsvalues.append(0)
+        if len(hsnames) < 10:
+            for ii in range(10-len(hsnames)):
+                hsnames.append('')
+                hsvalues.append(0)
+        hiscore = hsvalues[0]
+
         theSurf, theRect = make_text_image(str(hiscore), BASICFONT, WHITE)
         theRect.topleft = (10, 26)
         self.mazeSurf.blit(theSurf, theRect)
@@ -759,7 +780,7 @@ class Buff(object):
         self.xypos = uv_to_xy(self.uvpos)
         self.duration = config.get('Buff','fduration')
         self.type = level.buffs[level.idx_energyLevel-1]
-        self.surf = resource.buffs[level.buffs[level.idx_energyLevel-1]]
+        self.surf = resource.buffs[self.type]
         level.idx_energyLevel += 1
         self.stime = time.time()
 
@@ -1530,8 +1551,10 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
             if ghost.mode == Ghost.MODE_FREIGHTEN:
                 # eat a ghost
                 ghost.mode = Ghost.MODE_DYING
+                ghost.freq_modifier = {}
                 score += 100
                 neats += 1
+                level.ghost_ate.append(ghost.id)
                 isJustEat = True
                 eatman.lastEatTime = time.time()
                 resource.sounds['eatghost'].play()
@@ -1562,6 +1585,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
     for id in range(len(fruits)-1,-1,-1):
         if [u, v] == xy_to_uv(fruits[id].xypos):
             score += 400
+            level.fruit_ate.append(fruits[id].surf)
             ftexts.append(FlashingTexts('400', fruits[id].xypos))
             del fruits[id]
 
@@ -1611,6 +1635,8 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
 
     # hit a buff
     if buff.active and buff.uvpos == [u, v]:
+        score += 100
+        level.buff_ate.append(buff.type)
         buff.apply(eatman, ghosts, fires, explosion)
     
     # add life reward
@@ -1701,8 +1727,9 @@ def draw_game_stats(level, eatman, ghosts):
     #rect = copy.copy(level.rect_energy)
     #rect[2] = int(level.rect_energy[2]*percent)
     #pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
-    #DISPLAYSURF.blit(resource.buffs[level.buffs[level.idx_energyLevel-1]], 
-    #        (WINDOW_WIDTH/2, WINDOW_HEIGHT-TILE_HEIGHT))
+    if debugit:
+        DISPLAYSURF.blit(resource.buffs[level.buffs[level.idx_energyLevel-1]], 
+                (WINDOW_WIDTH/2, WINDOW_HEIGHT-TILE_HEIGHT-18))
 
     # nlifes
     xx = 10
@@ -1715,7 +1742,7 @@ def make_text_image(text, font, color):
     surf = font.render(text, True, color)
     return surf, surf.get_rect()
 
-def show_text_screen(text, color=WHITE):
+def show_text_screen(text, color=WHITE, addtext='Press Enter to play.'):
     # This function displays large text in the
     # center of the screen until a key is pressed.
     # Draw the text drop shadow
@@ -1729,8 +1756,8 @@ def show_text_screen(text, color=WHITE):
     DISPLAYSURF.blit(titleSurf, titleRect)
 
     # Draw the additional "Press a key to play." text.
-    pressKeySurf, pressKeyRect = make_text_image('Press Enter to play.', BASICFONT, WHITE)
-    pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 100)
+    pressKeySurf, pressKeyRect = make_text_image(addtext, BASICFONT, WHITE)
+    pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 150)
     DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
 
     while check_for_key_press() == None:
@@ -1755,7 +1782,7 @@ def check_for_key_press():
             continue
         if event.key == K_RETURN:
             return event.key
-    pygame.event.clear()
+    #pygame.event.clear()
     return None
 
 def terminate():
@@ -1770,6 +1797,7 @@ def show_pause_screen():
     return pause_duration
 
 def show_title_screen():
+    DISPLAYSURF.fill(BACKGROUND_COLOR)
     show_text_screen('EatMan', color=YELLOW)
 
 def show_lose_screen():
@@ -1778,28 +1806,191 @@ def show_lose_screen():
     pause_duration = time.time()-pause_stime
     return pause_duration
 
+def enter_name_screen(position):
+
+    backrect = pygame.Rect(0, 0, WINDOW_WIDTH*0.7, WINDOW_HEIGHT*0.7)
+    backrect.center = DISPLAYSURF.get_rect().center
+    playerName = ''
+    theSurf, theRect = make_text_image(playerName, BASICFONT, WHITE)
+    theRect.center = (WINDOW_WIDTH/2, WINDOW_HEIGHT/2)
+    DISPLAYSURF.blit(theSurf, theRect)
+    loopit = True
+    while loopit:
+        check_for_quit()
+        changed = False
+        for event in pygame.event.get([KEYDOWN, KEYUP]):
+            if event.type == KEYDOWN:
+                continue
+            if event.key >= K_a and event.key <= K_z:
+                if len(playerName) < 10:
+                    playerName += chr(event.key).upper()
+                    changed = True
+            elif event.key == K_BACKSPACE:
+                if len(playerName) > 0:
+                    playerName = playerName[:-1]
+                    changed = True
+            elif event.key == K_RETURN:
+                loopit = False
+                break
+
+        # Background
+        pygame.draw.rect(DISPLAYSURF, BLACK, backrect)
+        pygame.draw.rect(DISPLAYSURF, BLUE, backrect, 2)
+
+        theSurf, theRect = make_text_image('CONGRADULATIONS!', BASICFONT, YELLOW)
+        theRect.center = (WINDOW_WIDTH/2, backrect[0]+40)
+        DISPLAYSURF.blit(theSurf, theRect)
+        theSurf, theRect = make_text_image('You made no. '+str(position+1)+' on the leader board.', 
+                BASICFONT, YELLOW)
+        theRect.center = (WINDOW_WIDTH/2, backrect[0]+70)
+        DISPLAYSURF.blit(theSurf, theRect)
+
+        theSurf, theRect = make_text_image('Please enter your name', BASICFONT, WHITE)
+        theRect.center = (WINDOW_WIDTH/2, WINDOW_HEIGHT/2 - 50)
+        DISPLAYSURF.blit(theSurf, theRect)
+
+        theSurf, theRect = make_text_image(playerName, BASICFONT, WHITE)
+        theRect.center = (WINDOW_WIDTH/2, WINDOW_HEIGHT/2)
+        DISPLAYSURF.blit(theSurf, theRect)
+
+        line_start_pos = (theRect.right, theRect.bottom)
+        if round(time.time()) % 2 == 0:
+            pygame.draw.line(DISPLAYSURF, WHITE, 
+                    line_start_pos, (line_start_pos[0]+15,line_start_pos[1]), 2)
+
+        pygame.display.update()
+        CLOCK_FPS.tick(FPS_LOW)
+
+    return playerName
+
 def show_gameover_screen():
-    show_text_screen('Game Over')
 
-def show_win_screen():
-    show_text_screen('Win')
+    for ii in range(len(hsvalues)):
+        if hsvalues[ii] <= score:
+            playerName = enter_name_screen(ii)
+            hsnames.insert(ii, playerName)
+            hsvalues.insert(ii, score)
+            del hsnames[-1]
+            del hsvalues[-1]
+            save_hiscore()
+            break
 
-def save_hiscore(score):
+    rect = pygame.Rect(0, 0, WINDOW_WIDTH*0.7, WINDOW_HEIGHT*0.7)
+    rect.center = DISPLAYSURF.get_rect().center
+    pygame.draw.rect(DISPLAYSURF, BLACK, rect)
+    pygame.draw.rect(DISPLAYSURF, BLUE, rect, 2)
+
+    theSurf, theRect = make_text_image('Game Over', MIDFONT, GRAY)
+    theRect.center = (WINDOW_WIDTH/2, rect[0]-20) 
+    DISPLAYSURF.blit(theSurf, theRect)
+    theSurf, theRect = make_text_image('Game Over', MIDFONT, WHITE)
+    theRect.center = (WINDOW_WIDTH/2-3, rect[0]-20-3)
+    DISPLAYSURF.blit(theSurf, theRect)
+
+    theSurf, theRect = make_text_image('Leader Board', BASICFONT, YELLOW)
+    theRect.centerx = WINDOW_WIDTH/2
+    theRect.top = rect[0] + 25
+    DISPLAYSURF.blit(theSurf, theRect)
+
+    # a line
+    yy = rect[0] + 50
+    pygame.draw.line(DISPLAYSURF, BLUE, (WINDOW_WIDTH/2-150, yy), (WINDOW_WIDTH/2+150, yy), 1)
+
+    yy += 20
+    for ii in range(len(hsvalues)):
+        theSurf, theRect = make_text_image(hsnames[ii], BASICFONT, WHITE)
+        theRect.midright = (WINDOW_WIDTH/2-40, yy)
+        DISPLAYSURF.blit(theSurf, theRect)
+        theSurf, theRect = make_text_image(str(hsvalues[ii]), BASICFONT, WHITE)
+        theRect.midleft = (WINDOW_WIDTH/2+40, yy)
+        DISPLAYSURF.blit(theSurf, theRect)
+        yy += TILE_HEIGHT + 5
+
+
+    show_text_screen('',WHITE,'Press Enter to continue') # for key check
+    show_title_screen()
+
+
+def show_win_screen(level, ghosts):
+
+    rect = pygame.Rect(0, 0, WINDOW_WIDTH*0.7, WINDOW_HEIGHT*0.7)
+    rect.center = DISPLAYSURF.get_rect().center
+    pygame.draw.rect(DISPLAYSURF, BLACK, rect)
+    pygame.draw.rect(DISPLAYSURF, BLUE, rect, 2)
+
+    theSurf, theRect = make_text_image('You Win', MIDFONT, GRAY)
+    theRect.center = (WINDOW_WIDTH/2, rect[0]-20)
+    DISPLAYSURF.blit(theSurf, theRect)
+    theSurf, theRect = make_text_image('You Win', MIDFONT, WHITE)
+    theRect.center = (WINDOW_WIDTH/2-3, rect[0]-20-3)
+    DISPLAYSURF.blit(theSurf, theRect)
+
+    theSurf, theRect = make_text_image('Level Stats', BASICFONT, YELLOW)
+    theRect.centerx = WINDOW_WIDTH/2
+    theRect.top = rect[0] + 40
+    DISPLAYSURF.blit(theSurf, theRect)
+
+    xx = WINDOW_WIDTH/2 - 40
+    yy = rect[0] + 80
+    for ghost in ghosts:
+        num = level.ghost_ate.count(ghost.id)
+        if num > 0:
+            img = ghost.frames[0].copy()
+            for y in range(7, 7+3):
+                for x in range (8, 8+2):
+                    img.set_at((x,y), BLUE)
+                    img.set_at((x+9,y), BLUE)
+            DISPLAYSURF.blit(img, (xx, yy))
+            theSurf, theRect = make_text_image(str(num), BASICFONT, WHITE)
+            theRect.midleft = (xx+80, yy+TILE_HEIGHT/2)
+            DISPLAYSURF.blit(theSurf, theRect)
+            yy += TILE_HEIGHT+10
+
+    for fruit in resource.fruits:
+        num = level.fruit_ate.count(fruit)
+        if num > 0:
+            DISPLAYSURF.blit(fruit, (xx, yy))
+            theSurf, theRect = make_text_image(str(num), BASICFONT, WHITE)
+            theRect.midleft = (xx+80, yy+TILE_HEIGHT/2)
+            DISPLAYSURF.blit(theSurf, theRect)
+            yy += TILE_HEIGHT+10
+
+    for buffType in BUFFS_ALL:
+        num = level.buff_ate.count(buffType)
+        if num > 0:
+            DISPLAYSURF.blit(resource.buffs[buffType], (xx, yy))
+            theSurf, theRect = make_text_image(str(num), BASICFONT, WHITE)
+            theRect.midleft = (xx+80, yy+TILE_HEIGHT/2)
+            DISPLAYSURF.blit(theSurf, theRect)
+            yy += TILE_HEIGHT+10
+
+    theSurf, theRect = make_text_image('Score', BASICFONT, WHITE)
+    theRect.midright = (xx+TILE_WIDTH, yy+TILE_HEIGHT/2)
+    DISPLAYSURF.blit(theSurf, theRect)
+    theSurf, theRect = make_text_image(str(score-level.score_pre), BASICFONT, WHITE)
+    theRect.midleft = (xx+80, yy+TILE_HEIGHT/2)
+    DISPLAYSURF.blit(theSurf, theRect)
+    yy += TILE_HEIGHT+10
+
+    show_text_screen('')
+
+def save_hiscore():
     outs = open(os.path.join(SRCDIR,'hiscore.txt'),'w')
-    outs.write(str(score)+'\n')
+    for ii in range(len(hsvalues)):
+        outs.write(hsnames[ii]+','+str(hsvalues[ii])+'\n')
+    outs.close()
 
 def main():
 
-    global gameState, score, score_reward, DISPLAYSURF, BASICFONT, BIGFONT, CLOCK_FPS, nlifes
+    global debugit, gameState, score, score_reward, DISPLAYSURF, BASICFONT, MIDFONT, BIGFONT, CLOCK_FPS, nlifes
 
     pygame.init()
     CLOCK_FPS = pygame.time.Clock()
     DISPLAYSURF = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 
     BASICFONT = pygame.font.Font('freesansbold.ttf', 18)
-    #BASICFONT = pygame.font.SysFont(None, 18)
+    MIDFONT = pygame.font.Font('freesansbold.ttf', 46)
     BIGFONT = pygame.font.Font('freesansbold.ttf', 90)
-    #BIGFONT = pygame.font.SysFont(None, 100)
 
     pygame.display.set_caption('EatMan')
     pygame.display.set_icon(
@@ -1814,20 +2005,17 @@ def main():
 
     iLevel = 1 if len(sys.argv)==1 else int(sys.argv[1])
     iLevel_start = iLevel
+
+    debugit = 0 if len(sys.argv) <=2 else int(sys.argv[2])
+
     show_title_screen()
     while True: # game loop
         run_game(iLevel)
         if gameState == GAME_STATE_DEAD:
-            if score > hiscore:
-                save_hiscore(score)
-            show_gameover_screen()
             score = 0
             iLevel = iLevel_start
             nlifes = config.get('Game','ilifes')
         elif gameState == GAME_STATE_WIN:
-            if score > hiscore:
-                save_hiscore(score)
-            show_win_screen()
             iLevel += 1
 
 
@@ -1925,6 +2113,9 @@ def run_game(iLevel):
 
                 elif event.key == K_r:
                     gameState = GAME_STATE_RESTART
+
+                elif event.key == K_q:
+                    gameState = GAME_STATE_DYING
 
                 elif event.key == K_ESCAPE:
                     pause_duration = show_pause_screen()
@@ -2067,6 +2258,13 @@ def run_game(iLevel):
         pygame.display.update()
 
         #CLOCK_FPS.tick(FPS)
+
+    # we are out of the loop 
+    if gameState == GAME_STATE_WIN:
+        show_win_screen(level, ghosts)
+    elif gameState == GAME_STATE_DEAD:
+        show_gameover_screen()
+
 
 
 if __name__ == '__main__':
