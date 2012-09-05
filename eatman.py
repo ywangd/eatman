@@ -2019,11 +2019,17 @@ def main():
     nlifes = config.get('Game','ilifes')
     score_reward = config.get('Game','iscorereward')
 
-    iLevel = 1 if len(sys.argv)==1 else int(sys.argv[1])
+    iLevel = 1
+    debugit = 0
+    # optional command line arguments
+    if len(sys.argv) > 1:
+        for argv in sys.argv[1:]:
+            if argv[0:2] == '-l':
+                iLevel = int(argv[2:])
+            elif argv[0:2] == '-d':
+                debugit = 1
+
     iLevel_start = iLevel
-
-    debugit = 0 if len(sys.argv) <=2 else int(sys.argv[2])
-
     show_title_screen()
     while True: # game loop
         run_game(iLevel)
