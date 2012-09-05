@@ -13,9 +13,7 @@ ywangd@gmail.com
 '''
 
 # TODO
-# 1. Buff icon flash
-# 2. bomb animation/sound
-
+# 1. overal design/structure optimization of the code
 
 def we_are_frozen():
     """Returns whether we are frozen via py2exe.
@@ -34,11 +32,10 @@ def module_path():
 
 
 #SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
-#SRCDIR = 'C:\\eatman'
-SRCDIR                  = module_path()
+SRCDIR                  = module_path() # to make the executable happy
 
 FPS                     = 200
-FPS_LOW                 = 60
+FPS_LOW                 = 30
 
 WINDOW_WIDTH            = 504
 WINDOW_HEIGHT           = 600
@@ -454,12 +451,14 @@ class Level(object):
             for ii in range(10-len(hsnames)):
                 hsnames.append('')
                 hsvalues.append(0)
+        elif len(hsnames) > 10:
+            hsnames = hsnames[0:9]
+            hsvalues = hsvalues[0:9]
         hiscore = hsvalues[0]
-
+        # display the highest score
         theSurf, theRect = make_text_image(str(hiscore), BASICFONT, WHITE)
         theRect.topleft = (10, 26)
         self.mazeSurf.blit(theSurf, theRect)
-
 
         # The energy bar
         #quarter_width = int(WINDOW_WIDTH/4.0)
@@ -1704,6 +1703,9 @@ def reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits, buff)
 
     # eliminate buff (the not eaten ones)
     buff.active = False
+
+    # level finish time
+    level.stime += pause_duration
     
 
 def draw_game_stats(level, eatman, ghosts):
@@ -1782,7 +1784,7 @@ def check_for_key_press():
             continue
         if event.key == K_RETURN:
             return event.key
-    #pygame.event.clear()
+    pygame.event.clear()
     return None
 
 def terminate():
@@ -1832,6 +1834,7 @@ def enter_name_screen(position):
             elif event.key == K_RETURN:
                 loopit = False
                 break
+        pygame.event.clear() # clear all other events
 
         # Background
         pygame.draw.rect(DISPLAYSURF, BLACK, backrect)
@@ -1921,7 +1924,7 @@ def show_win_screen(level, ghosts):
     theSurf, theRect = make_text_image('You Win', MIDFONT, GRAY)
     theRect.center = (WINDOW_WIDTH/2, rect[0]-20)
     DISPLAYSURF.blit(theSurf, theRect)
-    theSurf, theRect = make_text_image('You Win', MIDFONT, WHITE)
+    theSurf, theRect = make_text_image('You Win', MIDFONT, YELLOW)
     theRect.center = (WINDOW_WIDTH/2-3, rect[0]-20-3)
     DISPLAYSURF.blit(theSurf, theRect)
 
@@ -1970,7 +1973,18 @@ def show_win_screen(level, ghosts):
     theSurf, theRect = make_text_image(str(score-level.score_pre), BASICFONT, WHITE)
     theRect.midleft = (xx+80, yy+TILE_HEIGHT/2)
     DISPLAYSURF.blit(theSurf, theRect)
-    yy += TILE_HEIGHT+10
+    yy += TILE_HEIGHT+5
+
+    theSurf, theRect = make_text_image('Time', BASICFONT, WHITE)
+    theRect.midright = (xx+TILE_WIDTH, yy+TILE_HEIGHT/2)
+    DISPLAYSURF.blit(theSurf, theRect)
+    nsecs = int(round(time.time()-level.stime))
+    nmins = nsecs/60
+    nsecs = nsecs % 60
+    theSurf, theRect = make_text_image(str(nmins)+"' "+str(nsecs)+'"', BASICFONT, WHITE)
+    theRect.midleft = (xx+80, yy+TILE_HEIGHT/2)
+    DISPLAYSURF.blit(theSurf, theRect)
+    yy += TILE_HEIGHT+5
 
     show_text_screen('')
 
@@ -2077,8 +2091,7 @@ def run_game(iLevel):
 
         for event in pygame.event.get():
             if event.type == QUIT:
-                pygame.quit()
-                sys.exit()
+                terminate()
 
             if event.type == KEYDOWN:
 
@@ -2108,13 +2121,13 @@ def run_game(iLevel):
                 elif event.key == K_DOWN:
                     moveDown = False
 
-                elif event.key == K_n:
+                elif event.key == K_n and debugit:
                     gameState = GAME_STATE_WIN
 
-                elif event.key == K_r:
+                elif event.key == K_r and debugit:
                     gameState = GAME_STATE_RESTART
 
-                elif event.key == K_q:
+                elif event.key == K_q and debugit:
                     gameState = GAME_STATE_DYING
 
                 elif event.key == K_ESCAPE:
@@ -2142,6 +2155,8 @@ def run_game(iLevel):
                     for fruit in fruits:
                         fruit.stime += pause_duration
                     level.fruit_lastSpawnTime += pause_duration
+                    # level finish time
+                    level.stime += pause_duration
 
 
         # Always change the facing direction when eatman is idle.
