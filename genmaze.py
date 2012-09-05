@@ -233,6 +233,7 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
     # find the end node
     walk_stack.append(wall) 
     walk_info[wall.pos] = (None, '') # previous node, direction
+    is_connected_to_boundary = False
     while len(walk_stack) > 0:
 
         c_cell = walk_stack.pop()
@@ -240,8 +241,12 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
         walk_visited.append(c_cell)
         is_middle_node = False
 
-        # do not add any outter walls and they are not end node either
+        # if it is an outter wall tile, add it directly to the end list
+        # and do not add any of its neighbours (so the contintue here).
+        # This ensure that at most 1 outter wall tile will be counted.
         if c_row <=0 or c_row >= nrows-1 or c_col <= 0 or c_col >= ncols-1:
+            is_connected_to_boundary = True
+            walk_end.append(c_cell)
             continue
 
         if c_row-1 > 0:
@@ -251,6 +256,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                 walk_stack.append(up_cell)
                 walk_info[up_cell.pos] = (c_cell, UP)
                 is_middle_node = True
+        else:
+            is_connected_to_boundary = True
 
         if c_row+1 < nrows-1:
             down_cell = tiles[(c_row+1,c_col)]
@@ -259,6 +266,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                 walk_stack.append(down_cell)
                 walk_info[down_cell.pos] = (c_cell, DOWN)
                 is_middle_node = True
+        else:
+            is_connected_to_boundary = True
 
         if c_col-1 > 0:
             left_cell = tiles[(c_row,c_col-1)]
@@ -267,6 +276,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                 walk_stack.append(left_cell)
                 walk_info[left_cell.pos] = (c_cell, LEFT)
                 is_middle_node = True
+        else:
+            is_connected_to_boundary = True
 
         if c_col+1 < ncols-1:
             right_cell = tiles[(c_row,c_col+1)]
@@ -275,6 +286,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                 walk_stack.append(right_cell)
                 walk_info[right_cell.pos] = (c_cell, RIGHT)
                 is_middle_node = True
+        else:
+            is_connected_to_boundary = True
 
         if not is_middle_node:
             walk_end.append(c_cell)
@@ -303,6 +316,7 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
         # find the ending node
         walk_stack_cand.append(tiles[cand])
         walk_info_cand[cand] = (None, '')
+        is_connected_to_boundary_cand = False
         while len(walk_stack_cand) > 0:
 
             c_cell = walk_stack_cand.pop()
@@ -311,6 +325,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
             is_middle_node = False
 
             if c_row <=0 or c_row >= nrows-1 or c_col <= 0 or c_col >= ncols-1:
+                is_connected_to_boundary_cand = True
+                walk_end_cand.append(c_cell)
                 continue
 
             if c_row-1 > 0:
@@ -320,6 +336,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                     walk_stack_cand.append(up_cell)
                     walk_info_cand[up_cell.pos] = (c_cell, UP)
                     is_middle_node = True
+            else:
+                is_connected_to_boundary_cand = True
 
             if c_row+1 < nrows-1:
                 down_cell = tiles[(c_row+1,c_col)]
@@ -328,6 +346,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                     walk_stack_cand.append(down_cell)
                     walk_info_cand[down_cell.pos] = (c_cell, DOWN)
                     is_middle_node = True
+            else:
+                is_connected_to_boundary_cand = True
 
             if c_col-1 > 0:
                 left_cell = tiles[(c_row,c_col-1)]
@@ -336,6 +356,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                     walk_stack_cand.append(left_cell)
                     walk_info_cand[left_cell.pos] = (c_cell, LEFT)
                     is_middle_node = True
+            else:
+                is_connected_to_boundary_cand = True
 
             if c_col+1 < ncols-1:
                 right_cell = tiles[(c_row,c_col+1)]
@@ -344,6 +366,8 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                     walk_stack_cand.append(right_cell)
                     walk_info_cand[right_cell.pos] = (c_cell, RIGHT)
                     is_middle_node = True
+            else:
+                is_connected_to_boundary_cand = True
 
             if not is_middle_node:
                 walk_end_cand.append(c_cell)
@@ -380,6 +404,7 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                     if thepath[-1] != chr:
                         thepath += chr
 
+                # Ensure no U shape wall
                 if thepath.find('urd') >= 0 \
                         or thepath.find('uld') >= 0 \
                         or thepath.find('lur') >= 0 \
@@ -392,6 +417,45 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
                     disqualified = True
                     del candidates[ii]
                     break
+
+                # This ensures no L shape wall thats connected to an outter wall, which
+                # essentially is another U shape wall
+                elif (is_connected_to_boundary or is_connected_to_boundary_cand) \
+                        and (thepath.find('ur') >= 0 \
+                        or thepath.find('ul') >= 0 \
+                        or thepath.find('lu') >= 0 \
+                        or thepath.find('ld') >= 0 \
+                        or thepath.find('dr') >= 0 \
+                        or thepath.find('dl') >= 0 \
+                        or thepath.find('rd') >= 0 \
+                        or thepath.find('ru') >= 0):
+
+                    disqualified = True
+                    del candidates[ii]
+                    break
+
+                # Ensure no Z shape wall
+                # NOTE: We are not limiting this
+                #elif thepath.find('uru') >= 0 \
+                #        or thepath.find('ulu') >= 0 \
+                #        or thepath.find('lul') >= 0 \
+                #        or thepath.find('ldl') >= 0 \
+                #        or thepath.find('drd') >= 0 \
+                #        or thepath.find('dld') >= 0 \
+                #        or thepath.find('rdr') >= 0 \
+                #        or thepath.find('rur') >= 0:
+
+                    #disqualified = True
+                    #del candidates[ii]
+                    #break
+                    #pass
+
+                # We can furthur limit the length of the end-to-end path!
+                # Its an option.
+
+                #print wall.pos, cand
+                #print thepath, walk_path[key1], walk_path_cand[key2]
+                #pmaze(tiles, 21, 21)
 
             if disqualified:
                 break
@@ -496,11 +560,11 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
     # The ghost chamber
     ghost_chamber = [
             '@@@#@#@@@',
-            '*###3###*', 
-            '*#**=**#*', 
+            '@###3###@', 
+            '@#**=**#@', 
             '##*012*##', 
-            '*#*****#*',
-            '*#######*',
+            '@#*****#@',
+            '@#######@',
             '@#@@@@@#@',
             ]
     if rc %2 == 0: # even row center

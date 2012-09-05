@@ -51,7 +51,7 @@ class BuildExe:
         self.project_url = "about:none"
  
         #Version of program
-        self.project_version = "0.1"
+        self.project_version = "0.2"
  
         #License of the program
         self.license = "Free"
@@ -68,7 +68,7 @@ class BuildExe:
         self.icon_file = 'eatman.ico'
  
         #Extra files/dirs copied to game
-        self.extra_datas = ['levels','sounds','sprites','tiles','config.ini','hiscore.txt','freesansbold.ttf']
+        self.extra_datas = ['levels','sounds','sprites','tiles','config.ini','freesansbold.ttf']
  
         #Extra/excludes python modules
         self.extra_modules = ['numpy']
