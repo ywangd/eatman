@@ -446,12 +446,11 @@ class Level(object):
                 name, value = line.strip().split(',')
                 hsnames.append(name)
                 hsvalues.append(int(value))
-        except ValueError:
-            hsnames.append('')
-            hsvalues.append(0)
+        except IOError, ValueError:
+            pass
         if len(hsnames) < 10:
             for ii in range(10-len(hsnames)):
-                hsnames.append('')
+                hsnames.append('NONAME')
                 hsvalues.append(0)
         elif len(hsnames) > 10:
             hsnames = hsnames[0:9]
@@ -1865,6 +1864,9 @@ def enter_name_screen(position):
 
         pygame.display.update()
         CLOCK_FPS.tick(FPS_LOW)
+
+    if playerName == '':
+        playerName = 'NONAME'
 
     return playerName
 
