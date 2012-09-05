@@ -157,7 +157,7 @@ class Resource(object):
         self.ghost_recover = {}
         self.glasses = {}
         self.buffs = {}
-        self.exploding = {}
+        self.explosion = {}
         self.fruits = []
 
         files = os.listdir(os.path.join(SRCDIR,'sprites'))
@@ -193,9 +193,11 @@ class Resource(object):
                 self.buffs[filename[0:-4]] = pygame.image.load(
                         os.path.join(SRCDIR,'sprites',filename)).convert()
 
-            if filename[0:-6] == 'exploding':
-                self.exploding[filename[0:-4]] = pygame.image.load(
-                        os.path.join(SRCDIR,'sprites',filename)).convert()
+            if filename[0:-4] == 'explosion':
+                theSurf = pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert()
+                for ii in range(15):
+                    self.explosion[ii] = theSurf.subsurface(
+                            TILE_WIDTH * (ii%4), TILE_HEIGHT*(ii/4), TILE_WIDTH, TILE_HEIGHT)
 
             if filename[0:-6] == 'fruit':
                 self.fruits.append(
@@ -634,7 +636,7 @@ class Explosion(object):
         self.lastAnimTime = time.time()
         self.animFreq = config.get('Buff','fexplosion_animatefrequency')
         self.idx_frame = 0
-        self.frame_sequence = [1,2,3,4,5,6,7,8,9]
+        self.frame_sequence = range(14,-1,-1) + [0]
 
     def start(self, xypos):
         self.xypos = copy.copy(xypos)
@@ -647,7 +649,7 @@ class Explosion(object):
             return
 
         id = self.frame_sequence[self.idx_frame]
-        DISPLAYSURF.blit(resource.exploding['exploding-'+str(id)], self.xypos)
+        DISPLAYSURF.blit(resource.explosion[id], self.xypos)
         if time.time()-self.lastAnimTime > self.animFreq:
             self.idx_frame += 1
             self.lastAnimTime = time.time()
@@ -798,7 +800,7 @@ class Buff(object):
         elif self.type == BUFF_BOMB: # randomly blow up a ghost
             ghost_to_die = []
             for ghost in ghosts:
-                if ghost.mode != Ghost.MODE_DYING or ghost.mode != Ghost.MODE_DEAD:
+                if ghost.mode != Ghost.MODE_DYING and ghost.mode != Ghost.MODE_DEAD:
                     ghost_to_die.append(ghost)
             if len(ghost_to_die) > 0:
                 ghost_to_die = random.choice(ghost_to_die)
@@ -2129,6 +2131,11 @@ def run_game(iLevel):
 
                 elif event.key == K_q and debugit:
                     gameState = GAME_STATE_DYING
+
+                elif event.key == K_b and debugit:
+                    buff.active = True
+                    buff.type = BUFF_BOMB
+                    buff.apply(eatman, ghosts, fires, explosion)
 
                 elif event.key == K_ESCAPE:
                     pause_duration = show_pause_screen()
