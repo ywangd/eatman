@@ -400,9 +400,9 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
 
                 thepath = combpath[0]
                 # eliminate the repeated chars
-                for chr in combpath[1:]:
-                    if thepath[-1] != chr:
-                        thepath += chr
+                for onechr in combpath[1:]:
+                    if thepath[-1] != onechr:
+                        thepath += onechr
 
                 # Ensure no U shape wall
                 if thepath.find('urd') >= 0 \
@@ -436,25 +436,30 @@ def get_new_wall_link(tiles, nrows, ncols, wall):
 
                 # Ensure no Z shape wall
                 # NOTE: We are not limiting this
-                #elif thepath.find('uru') >= 0 \
-                #        or thepath.find('ulu') >= 0 \
-                #        or thepath.find('lul') >= 0 \
-                #        or thepath.find('ldl') >= 0 \
-                #        or thepath.find('drd') >= 0 \
-                #        or thepath.find('dld') >= 0 \
-                #        or thepath.find('rdr') >= 0 \
-                #        or thepath.find('rur') >= 0:
+                elif thepath.find('uru') >= 0 \
+                        or thepath.find('ulu') >= 0 \
+                        or thepath.find('lul') >= 0 \
+                        or thepath.find('ldl') >= 0 \
+                        or thepath.find('drd') >= 0 \
+                        or thepath.find('dld') >= 0 \
+                        or thepath.find('rdr') >= 0 \
+                        or thepath.find('rur') >= 0:
 
-                    #disqualified = True
-                    #del candidates[ii]
-                    #break
-                    #pass
+                    disqualified = True
+                    del candidates[ii]
+                    break
 
                 # We can furthur limit the length of the end-to-end path!
-                # Its an option.
+                # The number of nodes are length of combpath plus 2.
+                elif len(combpath)+2 > 7:
+
+                    disqualified = True
+                    del candidates[ii]
+                    break
 
                 #print wall.pos, cand
                 #print thepath, walk_path[key1], walk_path_cand[key2]
+                #print combpath
                 #pmaze(tiles, 21, 21)
 
             if disqualified:
