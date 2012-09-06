@@ -1785,6 +1785,8 @@ def check_for_key_press():
             continue
         if event.key == K_RETURN or event.key == K_SPACE:
             return event.key
+        elif event.key == K_BACKQUOTE:
+            pygame.display.iconify()
     pygame.event.clear()
     return None
 
@@ -1835,6 +1837,8 @@ def enter_name_screen(position):
             elif event.key == K_RETURN:
                 loopit = False
                 break
+            elif event.key == K_BACKQUOTE:
+                pygame.display.iconify()
         pygame.event.clear() # clear all other events
 
         # Background
@@ -2144,6 +2148,12 @@ def run_game(iLevel):
                     buff.active = True
                     buff.type = BUFF_BOMB
                     buff.apply(eatman, ghosts, fires, explosion)
+
+                elif event.key == K_BACKQUOTE:
+                    if pygame.display.iconify():
+                        pygame.event.clear()
+                        pygame.event.post(pygame.event.Event(KEYUP, {'key':K_ESCAPE,'mod':KMOD_NONE}))
+
 
                 elif event.key == K_ESCAPE:
                     pause_duration = show_pause_screen()
