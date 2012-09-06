@@ -360,23 +360,20 @@ class Level(object):
         for line in self.data:
             assert len(line) == self.ncols
 
-        # the fruit interval increases with the maze size
-        self.fruit_interval = config.get('Fruit','finterval') + (self.ncols-21)*5
+        #self.fruit_interval = config.get('Fruit','finterval') + (self.ncols-21)*5
 
-    def set_data(self, data):
-        self.data = []
-        for onerow in data:
-            self.data.append(list(onerow.replace(L_EMPTY, L_BEAN)))
-        self.nrows = len(self.data)
-        self.ncols = len(self.data[0])
-        for line in self.data:
-            assert len(line) == self.ncols
-
-        self.ghost_params[0] = {}
-        self.ghost_params[1] = {}
-        self.ghost_params[2] = {}
-        self.ghost_params[3] = {}
-
+        # the fruit interval decrease with level number
+        self.fruit_interval = config.get('Fruit','finterval') - (self.iLevel-1)*2
+        if self.fruit_interval < 40:
+            self.fruit_interval = 40
+        # set the possible fruit types for the level
+        fruit_lb = (self.iLevel-1)/2
+        fruit_important = (self.iLevel-1) % 2
+        if fruit_lb >= len(resource.fruits)-1:
+            fruit_lb = len(resource.fruits)-2
+            fruit_important = 0
+        self.fruit_pool = [fruit_lb, fruit_lb+1]
+        self.fruit_pool.append(self.fruit_pool[fruit_important])
 
     def analyze_data(self, DISPLAYSURF):
 
@@ -699,7 +696,9 @@ class Fruit(object):
         self.speed = config.get('Fruit', 'ispeed')
         self.stime = time.time()
         self.duration = config.get('Fruit', 'fduration')
-        self.surf = random.choice(resource.fruits)
+        fruitid = random.choice(level.fruit_pool)
+        self.surf = resource.fruits[fruitid]
+        self.score = 300 + fruitid*100
         self.xypos = uv_to_xy(random.choice(level.uvpos_teleport))
         self.pathway = RIGHT if self.xypos[0] <= TILE_WIDTH else LEFT
         self.movedFrom = None
@@ -826,15 +825,15 @@ class Buff(object):
         if not self.active:
             return
 
-        if self.state == Buff.INSIDE_MAP and round(time.time()*10) % 5 == 0:
-            pygame.draw.rect(DISPLAYSURF, WHITE, 
-                    self.xypos + [TILE_WIDTH, TILE_HEIGHT], 1)
-
         if time.time()-self.stime > self.duration - 1.5:
             if round(time.time()*10) % 2 == 0:
                 DISPLAYSURF.blit(self.surf, self.xypos)
         else:
             DISPLAYSURF.blit(self.surf, self.xypos)
+
+        if self.state == Buff.INSIDE_MAP and round(time.time()*10) % 5 == 0:
+            pygame.draw.rect(DISPLAYSURF, WHITE, 
+                    self.xypos + [TILE_WIDTH, TILE_HEIGHT], 1)
 
     def is_expired(self):
         if time.time()-self.stime > self.duration:
@@ -1584,9 +1583,9 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
     # hit a fruit?
     for id in range(len(fruits)-1,-1,-1):
         if [u, v] == xy_to_uv(fruits[id].xypos):
-            score += 400
+            score += fruits[id].score
             level.fruit_ate.append(fruits[id].surf)
-            ftexts.append(FlashingTexts('400', fruits[id].xypos))
+            ftexts.append(FlashingTexts(str(fruits[id].score), fruits[id].xypos))
             del fruits[id]
 
     # Check if a bean is hit
@@ -2149,6 +2148,9 @@ def run_game(iLevel):
                     buff.type = BUFF_BOMB
                     buff.apply(eatman, ghosts, fires, explosion)
 
+                elif event.key == K_f and debugit:
+                    level.fruit_lastSpawnTime = 0
+
                 elif event.key == K_BACKQUOTE:
                     if pygame.display.iconify():
                         pygame.event.clear()
@@ -2297,7 +2299,7 @@ def run_game(iLevel):
         # Update the actual screen image
         pygame.display.update()
 
-        #CLOCK_FPS.tick(FPS)
+        CLOCK_FPS.tick(FPS)
 
     # we are out of the loop 
     if gameState == GAME_STATE_WIN:
