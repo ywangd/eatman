@@ -1783,7 +1783,7 @@ def check_for_key_press():
     for event in pygame.event.get([KEYDOWN, KEYUP]):
         if event.type == KEYDOWN:
             continue
-        if event.key == K_RETURN:
+        if event.key == K_RETURN or event.key == K_SPACE:
             return event.key
     pygame.event.clear()
     return None
