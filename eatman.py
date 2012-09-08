@@ -55,6 +55,13 @@ GAME_STATE_WIN          = 1
 GAME_STATE_DYING        = 2
 GAME_STATE_DEAD         = 3
 GAME_STATE_RESTART      = 4
+GAME_STATE_RETURN_TITLE = 5
+
+MAX_LEVEL               = 16
+BUTTON_SIZE             = 70
+BUTTON_GAP              = 10 
+NBUTTON_PER_ROW         = 4
+NBUTTON_PER_COL         = 4
 
 STATIC                  = 's'
 UP                      = 'u'
@@ -95,7 +102,8 @@ BURLYWOOD               = (222, 184, 135, 255)
 
 ALL_GHOST_COLORS        = [RED, PINK, CYAN, ORANGE, GRASS, PURPLE, CHOCOLATE, GRAY, BURLYWOOD]
 
-BLUE                    = (50,   50, 255, 255)
+BLUE                    = ( 50,  50, 255, 255)
+DARKBLUE                = (  0,   0, 150, 255)
 WHITE                   = (248, 248, 248, 255)
 BLACK                   = (  0,   0,   0, 255)
 YELLOW                  = (255, 255,   0, 255)
@@ -170,6 +178,10 @@ class Resource(object):
 
         files = os.listdir(os.path.join(SRCDIR,'sprites'))
         for filename in files:
+
+            if filename == 'lock.gif':
+                self.lockimg = pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert()
+
             if filename[0:4] == 'fire' and filename[-3:] == 'gif':
                 key = filename[:-4]
                 self.fires[key] = pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert()
@@ -255,6 +267,7 @@ hiscore = 0
 hsnames = []
 hsvalues = []
 score = 0
+hilevel = 1
 nlifes = 0
 score_reward = 0
 BASICFONT = None
@@ -301,7 +314,7 @@ class Level(object):
 
         # The base parameters for the 4 ghosts
         for ii in range(4):
-            fastratio = 0.6 + iLevel*(1.0/38.0)*0.4 # ghost reach max speed at level 38
+            fastratio = 0.6 + iLevel*(1.0/30.0)*0.4 # ghost reach max speed at level 30
             if ii==3: # red
                 fastratio *= 1.05
             if fastratio > 1.0:
@@ -309,7 +322,7 @@ class Level(object):
             self.ghost_params[ii]['fast'] = fastratio
 
             if ii==2: # orange
-                moltenratio = iLevel*3
+                moltenratio =3 + (iLevel-1)
                 if moltenratio >= 50:
                     moltenratio = 50
                 self.ghost_params[ii]['molten'] = moltenratio
@@ -1707,6 +1720,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff, ele
     # hit a fruit?
     for id in range(len(fruits)-1,-1,-1):
         if [u, v] == xy_to_uv(fruits[id].xypos):
+            resource.sounds['eatfruit'].play()
             score += fruits[id].score
             level.fruit_ate.append(fruits[id].surf)
             ftexts.append(FlashingTexts(str(fruits[id].score), fruits[id].xypos))
@@ -1758,6 +1772,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff, ele
 
     # hit a buff
     if buff.active and buff.uvpos == [u, v]:
+        resource.sounds['eatbuff'].play()
         score += 100
         level.buff_ate.append(buff.type)
         buff.apply(eatman, ghosts, fires, explosion, electric)
@@ -1869,7 +1884,7 @@ def make_text_image(text, font, color):
     surf = font.render(text, True, color)
     return surf, surf.get_rect()
 
-def show_text_screen(text, color=WHITE, addtext='Press Enter to play.'):
+def show_text_screen(text, color=WHITE, addtext='Press Space to play', checkEsc=False):
     # This function displays large text in the
     # center of the screen until a key is pressed.
     # Draw the text drop shadow
@@ -1882,14 +1897,19 @@ def show_text_screen(text, color=WHITE, addtext='Press Enter to play.'):
     titleRect.center = (int(WINDOW_WIDTH / 2) - 3, int(WINDOW_HEIGHT / 2) - 3)
     DISPLAYSURF.blit(titleSurf, titleRect)
 
-    # Draw the additional "Press a key to play." text.
+    # Draw the additional "Press a key to play" text.
     pressKeySurf, pressKeyRect = make_text_image(addtext, BASICFONT, WHITE)
     pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 180)
     DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
 
-    while check_for_key_press() == None:
+    while True:
+        keypress = check_for_key_press(checkEsc=checkEsc)
+        if keypress is not None:
+            break
         pygame.display.update()
         CLOCK_FPS.tick(FPS_LOW)
+
+    return keypress
 
 
 def check_for_quit():
@@ -1900,7 +1920,7 @@ def check_for_quit():
     #        terminate() # terminate if the KEYUP event was for the Esc key
     #    pygame.event.post(event) # put the other KEYUP event objects back
 
-def check_for_key_press():
+def check_for_key_press(checkEsc=False):
     # Go through event queue looking for a KEYUP event.
     # Grab KEYDOWN events to remove them from the event queue.
     check_for_quit()
@@ -1908,6 +1928,8 @@ def check_for_key_press():
         if event.type == KEYDOWN:
             continue
         if event.key == K_RETURN or event.key == K_SPACE:
+            return event.key
+        elif checkEsc and event.key == K_ESCAPE:
             return event.key
         elif event.key == K_BACKQUOTE:
             pygame.display.iconify()
@@ -1919,19 +1941,260 @@ def terminate():
     sys.exit()
 
 
+def get_mouse_spot(brect, (x, y)):
+    x = x - brect[0] - BUTTON_GAP
+    y = y - brect[1] - BUTTON_GAP
+
+    col = x / (BUTTON_SIZE+BUTTON_GAP)
+    if col<0 or col >= NBUTTON_PER_ROW:
+        return None
+    col_mod = x % (BUTTON_SIZE + BUTTON_GAP)
+    if col_mod >= BUTTON_SIZE:
+        return None
+
+    row = y / (BUTTON_SIZE+BUTTON_GAP)
+    if row< 0 or row >= NBUTTON_PER_COL:
+        return None
+    row_mod = y % (BUTTON_SIZE + BUTTON_GAP)
+    if row_mod >= BUTTON_SIZE:
+        return None
+
+    return row, col
+
+def draw_level_button(selsurf, brect, ii, color, txtcolor=WHITE, bsize=BUTTON_SIZE):
+
+    row = ii / NBUTTON_PER_ROW
+    col = ii % NBUTTON_PER_ROW
+
+    sx = brect[0] + BUTTON_SIZE*col + BUTTON_GAP*(col+1)
+    sy = brect[1] + BUTTON_SIZE*row + BUTTON_GAP*(row+1)
+    srect = pygame.Rect(sx, sy, BUTTON_SIZE, BUTTON_SIZE)
+
+    rect = pygame.Rect(0, 0, bsize, bsize)
+    rect.center = srect.center
+
+    pygame.draw.rect(selsurf, color, rect)
+    tsurf, trect = make_text_image(str(ii+1), MIDFONT, txtcolor)
+    if bsize != BUTTON_SIZE:
+        sdiff = bsize - BUTTON_SIZE
+        tsurf = pygame.transform.smoothscale(tsurf, (trect[2]+sdiff, trect[3]+sdiff))
+        trect = tsurf.get_rect()
+    trect.center = srect.center
+    selsurf.blit(tsurf, trect)
+
+    if ii+1 > hilevel:
+        rect = resource.lockimg.get_rect()
+        rect.center = srect.center
+        selsurf.blit(resource.lockimg, rect)
+
+
+def show_select_level_screen(iLevel=None):
+    # this is for command line option
+    if iLevel is not None:
+        return iLevel
+
+    global NBUTTON_PER_COL
+    DISPLAYSURF.fill(BACKGROUND_COLOR)
+    selsurf = DISPLAYSURF.copy()
+
+    NBUTTON_PER_COL = MAX_LEVEL/4
+    if MAX_LEVEL % NBUTTON_PER_ROW != 0: NBUTTON_PER_COL += 1
+
+    w = BUTTON_SIZE*NBUTTON_PER_ROW + BUTTON_GAP*(NBUTTON_PER_ROW+1)
+    h = BUTTON_SIZE*NBUTTON_PER_COL + BUTTON_GAP*(NBUTTON_PER_COL+1)
+
+    brect = pygame.Rect(0,0,w,h)
+    brect.center = (WINDOW_WIDTH/2, WINDOW_WIDTH/2)
+    pygame.draw.rect(selsurf, GRAY, brect)
+
+    tsurf, trect = make_text_image('Select a level or press Space to start from level one', 
+            BASICFONT, WHITE)
+    trect.center = (WINDOW_WIDTH/2, WINDOW_HEIGHT/2 + 200)
+    selsurf.blit(tsurf, trect)
+
+    for ii in range(MAX_LEVEL):
+        draw_level_button(selsurf, brect, ii, BLUE, WHITE)
+
+    buttondown = False
+    loopit = True
+    bid = 0
+    while loopit:
+        ijpos = get_mouse_spot(brect, pygame.mouse.get_pos())
+        buttonup = False
+        check_for_quit()
+        for event in pygame.event.get():
+            if event.type == KEYUP:
+                if event.key == K_RETURN or event.key == K_SPACE:
+                    ijpos = (0, 0)
+                    loopit = False
+                elif event.key == K_ESCAPE:
+                    ijpos = None
+                    bid = -9999
+                    loopit = False
+                elif event.key == K_BACKQUOTE:
+                    pygame.display.iconify()
+            elif event.type == MOUSEBUTTONUP:
+                buttondown = False
+                buttonup = True
+            elif event.type == MOUSEBUTTONDOWN:
+                buttondown = True
+                buttonup = False
+
+        DISPLAYSURF.blit(selsurf, (0,0))
+        if ijpos is not None:
+            bid = ijpos[0]*NBUTTON_PER_ROW + ijpos[1]
+            if bid < hilevel:
+                if buttondown: color = CYAN
+                else: color = BLUE
+                if buttonup:
+                    loopit = False
+                draw_level_button(DISPLAYSURF, brect, bid, color, YELLOW, BUTTON_SIZE+10)
+
+        pygame.display.update()
+        CLOCK_FPS.tick(FPS_LOW)
+
+    return bid+1
+
+
 def show_pause_screen():
     pause_stime = time.time()
-    show_text_screen('PAUSE')
-    pause_duration = time.time()-pause_stime
+
+    backrect = pygame.Rect(3, WINDOW_HEIGHT/2-50, WINDOW_WIDTH-6, 100)
+    pygame.draw.rect(DISPLAYSURF, BLACK, backrect)
+    pygame.draw.rect(DISPLAYSURF, BLUE, backrect, 2)
+
+    titleSurf, titleRect = make_text_image('PAUSE', MIDFONT, GRAY)
+    titleRect.midtop = (WINDOW_WIDTH/2, WINDOW_HEIGHT/2-40)
+    DISPLAYSURF.blit(titleSurf, titleRect)
+
+    titleSurf, titleRect = make_text_image('PAUSE', MIDFONT, WHITE)
+    titleRect.midtop = (WINDOW_WIDTH/2-2, WINDOW_HEIGHT/2-40-2)
+    DISPLAYSURF.blit(titleSurf, titleRect)
+
+    #pressKeySurf, pressKeyRect = make_text_image('Press Space to continue or Esc to Quit', 
+    #        BASICFONT, WHITE)
+    #pressKeyRect.center = (int(WINDOW_WIDTH / 2), int(WINDOW_HEIGHT / 2) + 30)
+    #DISPLAYSURF.blit(pressKeySurf, pressKeyRect)
+
+    qrect = pygame.Rect(0,0,100,30)
+    qsurf = pygame.Surface((qrect[2], qrect[3])).convert()
+    tsurf, trect = make_text_image('Quit', BASICFONT, WHITE)
+    trect.center = qrect.center
+    qsurf.blit(tsurf, trect)
+
+    crect = pygame.Rect(0,0,100,30)
+    csurf = pygame.Surface((crect[2], crect[3])).convert()
+    tsurf, trect = make_text_image('Continue', BASICFONT, WHITE)
+    trect.center = crect.center
+    csurf.blit(tsurf, trect)
+
+    qrect.topright = (WINDOW_WIDTH/2-40, WINDOW_HEIGHT/2+10)
+    crect.topleft = (WINDOW_WIDTH/2+40, WINDOW_HEIGHT/2+10)
+
+    buttondown = False
+    loopit = True
+    while loopit:
+        xypos = pygame.mouse.get_pos()
+        buttonup = False
+        check_for_quit()
+        for event in pygame.event.get():
+            if event.type == KEYUP:
+                keypress = event.key
+                if event.key == K_RETURN or event.key == K_SPACE:
+                    loopit = False
+                    break
+                elif event.key == K_ESCAPE:
+                    loopit = False
+                    break
+                elif event.key == K_BACKQUOTE:
+                    pygame.display.iconify()
+            elif event.type == MOUSEBUTTONUP:
+                buttondown = False
+                buttonup = True
+            elif event.type == MOUSEBUTTONDOWN:
+                buttondown = True
+                buttonup = False
+
+        DISPLAYSURF.blit(qsurf, qrect)
+        DISPLAYSURF.blit(csurf, crect)
+
+        if qrect.collidepoint(xypos):
+            pygame.draw.rect(DISPLAYSURF, YELLOW, qrect, 2)
+            if buttonup:
+                keypress = K_ESCAPE
+                loopit = False
+        else:
+            pygame.draw.rect(DISPLAYSURF, BLUE, qrect, 2)
+
+        if crect.collidepoint(xypos):
+            pygame.draw.rect(DISPLAYSURF, YELLOW, crect, 2)
+            if buttonup:
+                keypress = K_SPACE
+                loopit = False
+        else:
+            pygame.draw.rect(DISPLAYSURF, BLUE, crect, 2)
+
+        pygame.display.update()
+        CLOCK_FPS.tick(FPS_LOW)
+
+    if keypress == K_ESCAPE:
+        pause_duration = None
+    else:
+        pause_duration = time.time()-pause_stime
     return pause_duration
 
+def show_endgame_screen():
+    DISPLAYSURF.fill(DARKBLUE)
+    tsurf, trect = make_text_image('Congradulations! You have defeated the game!', BASICFONT, YELLOW)
+    trect.center = WINDOW_WIDTH/2, 100
+    DISPLAYSURF.blit(tsurf, trect)
+
+    tsurf, trect = make_text_image('Mama & Papa Studio', BASICFONT, WHITE)
+    trect.midright = WINDOW_WIDTH-10, WINDOW_HEIGHT - 100
+    DISPLAYSURF.blit(tsurf, trect)
+
+    tsurf, trect = make_text_image('ywangd@gmail.com', BASICFONT, WHITE)
+    trect.midright = WINDOW_WIDTH-10, WINDOW_HEIGHT - 70
+    DISPLAYSURF.blit(tsurf, trect)
+
+    tsurf, trect = make_text_image('2012', BASICFONT, WHITE)
+    trect.midright = WINDOW_WIDTH-10, WINDOW_HEIGHT - 40
+    DISPLAYSURF.blit(tsurf, trect)
+
+    tsurf, trect = make_text_image('To our beloved Emma:', MIDFONT, PINK)
+    trect.bottomleft = 20, WINDOW_HEIGHT/2 - 10
+    DISPLAYSURF.blit(tsurf, trect)
+
+    tsurf, trect = make_text_image('We love you!', BIGFONT, PINK)
+    trect.midtop = WINDOW_WIDTH/2, WINDOW_HEIGHT/2 + 10
+    DISPLAYSURF.blit(tsurf, trect)
+
+    show_text_screen('', YELLOW, '', checkEsc=True) 
+
 def show_title_screen():
+    global WINDOW_WIDTH, WINDOW_HEIGHT
+    WINDOW_WIDTH = 504
+    WINDOW_HEIGHT = 600
+    pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     DISPLAYSURF.fill(BACKGROUND_COLOR)
-    show_text_screen('EatMan', color=YELLOW)
+    keypress = show_text_screen('EatMan', YELLOW, 'Press Space to start', checkEsc=True) 
+    if keypress == K_ESCAPE:
+        terminate()
 
 def show_lose_screen():
     pause_stime = time.time()
-    show_text_screen('Lose')
+    saveSurf = DISPLAYSURF.copy()
+    global gameState
+    while True:
+        keypress = show_text_screen('Lose', WHITE, 'Press Space to continue', checkEsc=True)
+        if keypress == K_ESCAPE:
+            if show_pause_screen() is None:
+                gameState = GAME_STATE_RETURN_TITLE
+                return None
+            else:
+                DISPLAYSURF.blit(saveSurf, (0,0))
+        else:
+            break
     pause_duration = time.time()-pause_stime
     return pause_duration
 
@@ -2019,7 +2282,7 @@ def show_gameover_screen():
     theRect.center = (WINDOW_WIDTH/2, rect[0]-20) 
     DISPLAYSURF.blit(theSurf, theRect)
     theSurf, theRect = make_text_image('Game Over', MIDFONT, WHITE)
-    theRect.center = (WINDOW_WIDTH/2-3, rect[0]-20-3)
+    theRect.center = (WINDOW_WIDTH/2-2, rect[0]-20-2)
     DISPLAYSURF.blit(theSurf, theRect)
 
     theSurf, theRect = make_text_image('Leader Board', BASICFONT, YELLOW)
@@ -2041,9 +2304,18 @@ def show_gameover_screen():
         DISPLAYSURF.blit(theSurf, theRect)
         yy += TILE_HEIGHT + 5
 
+    saveSurf = DISPLAYSURF.copy()
+    while True:
+        keypress = show_text_screen('',WHITE,'Press Space to continue', checkEsc=True) # for key check
+        if keypress == K_ESCAPE:
+            if show_pause_screen() is None:
+                gameState = GAME_STATE_RETURN_TITLE
+                return
+            else:
+                DISPLAYSURF.blit(saveSurf, (0,0))
+        else:
+            break
 
-    show_text_screen('',WHITE,'Press Enter to continue') # for key check
-    show_title_screen()
 
 
 def show_win_screen(level, ghosts):
@@ -2057,7 +2329,7 @@ def show_win_screen(level, ghosts):
     theRect.center = (WINDOW_WIDTH/2, rect[0]-20)
     DISPLAYSURF.blit(theSurf, theRect)
     theSurf, theRect = make_text_image('You Win', MIDFONT, YELLOW)
-    theRect.center = (WINDOW_WIDTH/2-3, rect[0]-20-3)
+    theRect.center = (WINDOW_WIDTH/2-2, rect[0]-20-2)
     DISPLAYSURF.blit(theSurf, theRect)
 
     theSurf, theRect = make_text_image('Level Stats', BASICFONT, YELLOW)
@@ -2118,7 +2390,19 @@ def show_win_screen(level, ghosts):
     DISPLAYSURF.blit(theSurf, theRect)
     yy += TILE_HEIGHT+5
 
-    show_text_screen('')
+    saveSurf = DISPLAYSURF.copy()
+    global gameState
+    while True:
+        keypress = show_text_screen('',WHITE,'Press Space to continue', checkEsc=True)
+        if keypress == K_ESCAPE:
+            if show_pause_screen() is None:
+                gameState = GAME_STATE_RETURN_TITLE
+                return
+            else:
+                DISPLAYSURF.blit(saveSurf, (0,0))
+        else:
+            break
+
 
 def save_hiscore():
     outs = open(os.path.join(SRCDIR,'hiscore.txt'),'w')
@@ -2126,9 +2410,39 @@ def save_hiscore():
         outs.write(hsnames[ii]+','+str(hsvalues[ii])+'\n')
     outs.close()
 
+def save_hilevel():
+    outs = open(os.path.join(SRCDIR,'hilevel.txt'),'w')
+    outs.write(str(hilevel)+'\n')
+    outs.close()
+
+
+def pause_before_start():
+    saveSurf = DISPLAYSURF.copy()
+
+    tsurf, trect = make_text_image(str(3), BIGFONT, WHITE)
+    trect.midtop = DISPLAYSURF.get_rect().center
+    DISPLAYSURF.blit(tsurf, trect)
+    pygame.display.update()
+    time.sleep(0.6)
+
+    tsurf, trect = make_text_image(str(2), BIGFONT, WHITE)
+    trect.midtop = DISPLAYSURF.get_rect().center
+    DISPLAYSURF.blit(saveSurf, (0,0))
+    DISPLAYSURF.blit(tsurf, trect)
+    pygame.display.update()
+    time.sleep(0.6)
+
+    tsurf, trect = make_text_image(str(1), BIGFONT, WHITE)
+    trect.midtop = DISPLAYSURF.get_rect().center
+    DISPLAYSURF.blit(saveSurf, (0,0))
+    DISPLAYSURF.blit(tsurf, trect)
+    pygame.display.update()
+    time.sleep(0.6)
+
+
 def main():
 
-    global debugit, gameState, score, score_reward, DISPLAYSURF, BASICFONT, MIDFONT, BIGFONT, CLOCK_FPS, nlifes
+    global debugit, gameState, score, score_reward, DISPLAYSURF, BASICFONT, MIDFONT, BIGFONT, CLOCK_FPS, nlifes, hilevel
 
     pygame.init()
     CLOCK_FPS = pygame.time.Clock()
@@ -2149,7 +2463,14 @@ def main():
     nlifes = config.get('Game','ilifes')
     score_reward = config.get('Game','iscorereward')
 
-    iLevel = 1
+    # high level
+    try:
+        hlfile = open(os.path.join(SRCDIR,'hilevel.txt'))
+        hilevel = int(hlfile.readline())
+    except IOError, ValueError:
+        hilevel = 1
+
+    iLevel = None
     debugit = 0
     # optional command line arguments
     if len(sys.argv) > 1:
@@ -2159,16 +2480,36 @@ def main():
             elif argv[0:2] == '-d':
                 debugit = 1
 
-    iLevel_start = iLevel
-    show_title_screen()
+    while True:
+        show_title_screen()
+        iLevel = show_select_level_screen(iLevel)
+        if iLevel >= 1:
+            break
+        else:
+            iLevel = None
+
     while True: # game loop
         run_game(iLevel)
-        if gameState == GAME_STATE_DEAD:
+        if gameState == GAME_STATE_DEAD or gameState == GAME_STATE_RETURN_TITLE:
             score = 0
-            iLevel = iLevel_start
             nlifes = config.get('Game','ilifes')
+            while True:
+                show_title_screen()
+                iLevel = show_select_level_screen()
+                if iLevel >= 1:
+                    break
         elif gameState == GAME_STATE_WIN:
             iLevel += 1
+            if iLevel > MAX_LEVEL:
+                show_endgame_screen()
+                while True:
+                    show_title_screen()
+                    iLevel = show_select_level_screen()
+                    if iLevel >= 1:
+                        break
+            elif iLevel > hilevel:
+                hilevel = iLevel
+                save_hilevel()
 
 
 def run_game(iLevel):
@@ -2221,6 +2562,16 @@ def run_game(iLevel):
 
     # electric
     electric = Electric()
+
+
+    # a brief wait
+    level.draw(DISPLAYSURF)
+    for ghost in ghosts:
+        ghost.draw(DISPLAYSURF, eatman)
+    eatman.draw(DISPLAYSURF)
+    # Draw game state infos
+    draw_game_stats(level, eatman, ghosts)
+    pause_before_start()
 
     moveLeft  = False
     moveRight = False
@@ -2299,6 +2650,9 @@ def run_game(iLevel):
 
                 elif event.key == K_ESCAPE:
                     pause_duration = show_pause_screen()
+                    if pause_duration is None:
+                        gameState = GAME_STATE_RETURN_TITLE
+                        return
                     # re-calculate important timers
                     # eatman
                     eatman.lastSlayerTime += pause_duration
@@ -2421,6 +2775,8 @@ def run_game(iLevel):
                     loopit = False
                 else:
                     pause_duration = show_lose_screen()
+                    if pause_duration is None:
+                        return
                     reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits, buff)
         else:
             eatman.draw(DISPLAYSURF)
@@ -2442,7 +2798,6 @@ def run_game(iLevel):
     
         # Update the actual screen image
         pygame.display.update()
-
         CLOCK_FPS.tick(FPS)
 
     # we are out of the loop 
