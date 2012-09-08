@@ -32,6 +32,7 @@ def module_path():
     return os.path.dirname(__file__)
 
 
+VERSION                 = 1.0
 #SRCDIR                  = os.path.dirname(os.path.abspath(__file__))
 SRCDIR                  = module_path() # to make the executable happy
 
@@ -2147,6 +2148,10 @@ def show_endgame_screen():
     DISPLAYSURF.fill(DARKBLUE)
     tsurf, trect = make_text_image('Congradulations! You have defeated the game!', BASICFONT, YELLOW)
     trect.center = WINDOW_WIDTH/2, 100
+    DISPLAYSURF.blit(tsurf, trect)
+
+    tsurf, trect = make_text_image('EatMan v'+str(VERSION), BASICFONT, WHITE)
+    trect.midright = WINDOW_WIDTH-10, WINDOW_HEIGHT - 130
     DISPLAYSURF.blit(tsurf, trect)
 
     tsurf, trect = make_text_image('Mama & Papa Studio', BASICFONT, WHITE)
