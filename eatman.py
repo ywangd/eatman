@@ -14,6 +14,7 @@ ywangd@gmail.com
 
 # TODO
 # 1. overal design/structure optimization of the code
+# 2. more buffs (electric, wall traspassing, shield)
 
 def we_are_frozen():
     """Returns whether we are frozen via py2exe.
@@ -62,7 +63,8 @@ LEFT                    = 'l'
 RIGHT                   = 'r'
 
 L_TELEPORT              = '$'
-L_BLOCK                 = '#' # so no bean will be there
+L_BLOCK                 = '#' # so no bean will be there, but eatman can move there
+L_REAL_BLOCK            = 'X' # no beans and eatman cannot move there
 L_WALL                  = '*'
 L_GHOST_DOOR            = '='
 L_EMPTY                 = ' '
@@ -102,7 +104,12 @@ BUFF_SLOW               = 'snow'
 BUFF_FREEZE             = 'ice'
 BUFF_SPEED              = 'boots'
 BUFF_BOMB               = 'bomb'
-BUFFS_ALL               = [BUFF_SLOW, BUFF_FREEZE, BUFF_SPEED, BUFF_BOMB]
+BUFF_ELECTRIC           = 'electric'
+BUFF_SHIELD             = 'shield'
+BUFF_DAO                = 'dao'
+BUFF_1UP                = '1up'
+BUFFS_ALL               = [BUFF_SLOW, BUFF_SPEED, BUFF_FREEZE, BUFF_BOMB, 
+                           BUFF_SHIELD, BUFF_ELECTRIC, BUFF_DAO, BUFF_1UP]
 
 class Config(object):
     '''
@@ -159,6 +166,7 @@ class Resource(object):
         self.buffs = {}
         self.explosion = {}
         self.fruits = []
+        self.lightning = {}
 
         files = os.listdir(os.path.join(SRCDIR,'sprites'))
         for filename in files:
@@ -202,6 +210,10 @@ class Resource(object):
             if filename[0:-6] == 'fruit':
                 self.fruits.append(
                         pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert())
+
+            if filename[0:-6] == 'lightning':
+                key = filename[:-4]
+                self.lightning[key] = pygame.image.load(os.path.join(SRCDIR,'sprites',filename)).convert()
 
 
     def recolor_tiles(self, level):
@@ -268,9 +280,6 @@ class Level(object):
         for ii in range(4):
             self.ghost_params[ii] = {}
 
-        self.buffs = copy.copy(BUFFS_ALL)
-        random.shuffle(self.buffs)
-
         self.uvpos_teleport = []
 
         self.fruit_lastSpawnTime = time.time()
@@ -284,8 +293,15 @@ class Level(object):
     def load(self, iLevel):
         self.iLevel = iLevel
 
+        # set up the available buff pool based on level number
+        buff_ub = 2 + (self.iLevel-1) / 2
+        if buff_ub > len(BUFFS_ALL):
+            buff_ub = len(BUFFS_ALL)
+        self.buff_pool = BUFFS_ALL[0:buff_ub]
+
+        # The base parameters for the 4 ghosts
         for ii in range(4):
-            fastratio = 0.6 + iLevel*(1.0/20.0)*0.4
+            fastratio = 0.6 + iLevel*(1.0/38.0)*0.4 # ghost reach max speed at level 38
             if ii==3: # red
                 fastratio *= 1.05
             if fastratio > 1.0:
@@ -297,7 +313,6 @@ class Level(object):
                 if moltenratio >= 50:
                     moltenratio = 50
                 self.ghost_params[ii]['molten'] = moltenratio
-
 
         filename = os.path.join(SRCDIR, 'levels', str(iLevel)+'.dat') 
         if os.path.exists(filename):
@@ -469,12 +484,21 @@ class Level(object):
         #self.rect_energy = rect
         #pygame.draw.rect(self.mazeSurf, BLACK, rect)
         
-        self.energyLevel = [0]
-        self.energyLevel.append(int(self.nbeans/3))
-        self.energyLevel.append(int(self.nbeans/1.2))
+        self.buffs = []
+        self.energyLevel = range(0, self.nbeans, 65)
         self.energyLevel.append(self.nbeans*2)
         self.idx_energyLevel = 1
         self.energy_decay_time = 2.0
+        for ii in range(len(self.energyLevel)-1):
+            thebuff = random.choice(self.buff_pool)
+            self.buffs.append(thebuff)
+            if thebuff == BUFF_1UP: # can only have one 1up buff per level
+                self.buff_pool.remove(BUFF_1UP)
+
+        #self.energyLevel = [0]
+        #self.energyLevel.append(int(self.nbeans/3))
+        #self.energyLevel.append(int(self.nbeans/1.2))
+        #self.energyLevel.append(self.nbeans*2)
 
 
     def analyze_tile(self, ix, iy):
@@ -586,6 +610,9 @@ class Level(object):
             return 'bean', corner_to_erase
 
         elif char == L_BLOCK:
+            return None
+
+        elif char == L_REAL_BLOCK:
             return None
 
         elif char == L_TELEPORT:
@@ -772,18 +799,21 @@ class Buff(object):
         self.duration = config.get('Buff','fduration')
         self.active = False
 
-    def start(self, level):
+    def start(self, level, type=None):
         self.active = True
         self.state = Buff.INSIDE_MAP
         self.uvpos = random.choice(level.uvpos_beans)
         self.xypos = uv_to_xy(self.uvpos)
         self.duration = config.get('Buff','fduration')
-        self.type = level.buffs[level.idx_energyLevel-1]
+        if type is None:
+            self.type = level.buffs[level.idx_energyLevel-1]
+            level.idx_energyLevel += 1
+        else:
+            self.type = type
         self.surf = resource.buffs[self.type]
-        level.idx_energyLevel += 1
         self.stime = time.time()
 
-    def apply(self, eatman, ghosts, fires, explosion):
+    def apply(self, eatman, ghosts, fires, explosion, electric):
         if self.type == BUFF_SLOW:
             for ghost in ghosts:
                 ghost.add_freq_modifier(
@@ -815,13 +845,33 @@ class Buff(object):
                     config.get('Buff','fspeed_duration')) 
             self.duration = config.get('Buff','fspeed_duration')
 
+        elif self.type == BUFF_ELECTRIC:
+            electric.start(self.xypos)
+            self.duration = 0.0
+            self.active = False
+
+        elif self.type == BUFF_SHIELD:
+            eatman.mode = Eatman.MODE_UNDYING
+            self.duration = config.get('Buff','fshield_duration')
+
+        elif self.type == BUFF_DAO:
+            eatman.mode = Eatman.MODE_DAO
+            self.duration = config.get('Buff','fdao_duration')
+
+        elif self.type == BUFF_1UP:
+            global nlifes
+            nlifes += 1
+            resource.sounds['extralife'].play()
+            self.duration = 0.0
+            self.active = False
+
         self.state = Buff.OUTSIDE_MAP
         self.stime = time.time()
         self.uvpos = [-1, -1]
         self.xypos = [WINDOW_WIDTH-TILE_WIDTH-10, WINDOW_HEIGHT-1*TILE_HEIGHT-18]
 
 
-    def draw(self, DISPLAYSURF):
+    def draw(self, DISPLAYSURF, eatman):
         if not self.active:
             return
 
@@ -834,6 +884,52 @@ class Buff(object):
         if self.state == Buff.INSIDE_MAP and round(time.time()*10) % 5 == 0:
             pygame.draw.rect(DISPLAYSURF, WHITE, 
                     self.xypos + [TILE_WIDTH, TILE_HEIGHT], 1)
+
+        if self.is_expired():
+            self.stop(eatman)
+
+    def is_expired(self):
+        if time.time()-self.stime > self.duration:
+            return True
+        else:
+            return False
+
+    def stop(self, eatman):
+        self.active = False
+        eatman.mode = Eatman.MODE_NORMAL
+
+
+class Electric(object):
+
+    def __init__(self):
+        self.stime = time.time()
+        self.lastAnimTime = time.time()
+        self.duration = config.get('Buff','felectric_duration')
+        self.animFreq = config.get('Buff','felectric_animatefrequency')
+        self.idx_frame = 0
+        self.frame_sequence = [1,2,3,1]
+        self.active = False
+
+    def start(self, xypos):
+        self.xypos = xypos
+        self.uvpos = xy_to_uv(xypos)
+        self.active = True
+        self.stime = time.time()
+
+    def animate(self, DISPLAYSURF):
+        if not self.active:
+            return
+
+        id = self.frame_sequence[self.idx_frame]
+        DISPLAYSURF.blit(resource.lightning['lightning-'+str(id)], self.xypos)
+        if time.time()-self.lastAnimTime > self.animFreq:
+            self.idx_frame += 1
+            self.lastAnimTime = time.time()
+            if self.idx_frame >= len(self.frame_sequence):
+                self.idx_frame = 0
+
+        if self.is_expired():
+            self.active = False
 
     def is_expired(self):
         if time.time()-self.stime > self.duration:
@@ -1257,9 +1353,6 @@ class Ghost(object):
 
                     elif self.tps == Ghost.TPS_PURSUER:
                         euvpos = xy_to_uv(eatman.xypos)
-                else:
-                    print 'the code shouldnt come here. something is wrong.'
-                    sys.exit(1)
 
                 # Generate the pathway
                 self.pathway = simplepath(level, self, euvpos)
@@ -1289,10 +1382,17 @@ class Eatman(object):
     MOTION_IDLE         = 1
     MOTION_ANIMATE      = 2
 
+    MODE_NORMAL         = 0
+    MODE_UNDYING        = 1
+    MODE_DAO            = 2
+    MODE_DAO_PASSING    = 3
+
     def __init__(self, level):
 
         self.motion          = Eatman.MOTION_IDLE
         self.direction      = STATIC
+
+        self.mode           = Eatman.MODE_NORMAL
 
         self.xypos = uv_to_xy(level.eatman_params['uvpos'])
 
@@ -1347,7 +1447,7 @@ class Eatman(object):
         return name
 
 
-    def make_move(self):
+    def make_move(self, buff):
 
         # modify the animation frequency by any buff/debuff
         animFreq = self.animFreq
@@ -1364,6 +1464,11 @@ class Eatman(object):
             if self.idx_frame >= self.nframes:
                 self.idx_frame = 0
                 self.motion = Eatman.MOTION_IDLE
+                if self.mode == Eatman.MODE_DAO_PASSING:
+                    if buff.active:
+                        self.mode = Eatman.MODE_DAO
+                    else:
+                        self.mode = Eatman.MODE_NORMAL
             else:
                 if self.direction == DOWN:
                     self.xypos[1] += self.speed
@@ -1515,14 +1620,23 @@ def is_valid_position(level, entity, uoffset=0, voffset=0):
     if level.data[v][u] not in blocks:
         return True
     else:
+        if isinstance(entity, Eatman) and entity.mode==Eatman.MODE_DAO:
+            if level.data[v][u] == L_WALL \
+                    and u>0 and v>0 and u<level.nrows-1 and v<level.ncols-1 \
+                    and level.data[v+voffset][u+uoffset] not in \
+                    blocks+[L_REAL_BLOCK,L_GHOST_0,L_GHOST_1,L_GHOST_2]:
+                return True
         return False
 
 
-def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
+def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff, electric):
 
     global score, score_reward, nlifes
 
     u, v = xy_to_uv(eatman.xypos)
+
+    if level.data[v][u] == L_WALL:
+        eatman.mode = Eatman.MODE_DAO_PASSING
 
     # Going through the ends of the tunnels
     if u == 0: 
@@ -1545,7 +1659,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
         elif gu == level.ncols-1:
             ghost.xypos = [ghost.xypos[0]-(level.ncols-2)*TILE_WIDTH, ghost.xypos[1]]
             gu = 1
-        # check the hit
+        # check the hit of eatman and ghost
         if [u, v] == [gu, gv]:
             if ghost.mode == Ghost.MODE_FREIGHTEN:
                 # eat a ghost
@@ -1559,10 +1673,20 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
                 resource.sounds['eatghost'].play()
             elif ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
                 neats += 1
+            elif eatman.mode == Eatman.MODE_UNDYING: # shield 
+                pass
             else:
                 # killed by a ghost
                 eatman.idx_frame = 0
                 return GAME_STATE_DYING
+        elif electric.active and ghost.mode != Ghost.MODE_DYING and electric.uvpos == [gu, gv]:
+                ghost.mode = Ghost.MODE_DYING
+                ghost.freq_modifier = {}
+                score += 100
+                neats += 1
+                level.ghost_ate.append(ghost.id)
+                isJustEat = True
+                eatman.lastEatTime = time.time()
         else:
             if ghost.mode == Ghost.MODE_DYING or ghost.mode == Ghost.MODE_DEAD:
                 neats += 1
@@ -1576,7 +1700,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
 
     # hit a fire?
     for fire in fires:
-        if fire.uvpos == [u, v]:
+        if fire.uvpos == [u, v] and eatman.mode != Eatman.MODE_UNDYING:
             eatman.idx_frame = 0
             return GAME_STATE_DYING
 
@@ -1636,7 +1760,7 @@ def check_hit(level, eatman, ghosts, fires, fruits, ftexts, explosion, buff):
     if buff.active and buff.uvpos == [u, v]:
         score += 100
         level.buff_ate.append(buff.type)
-        buff.apply(eatman, ghosts, fires, explosion)
+        buff.apply(eatman, ghosts, fires, explosion, electric)
     
     # add life reward
     if score >= score_reward:
@@ -1663,6 +1787,7 @@ def reset_after_lose(pause_duration, level, eatman, ghosts, fires, fruits, buff)
     # eatman
     eatman.motion = Eatman.MOTION_IDLE
     eatman.direction = STATIC
+    eatman.mode = Eatman.MODE_NORMAL
     eatman.idx_frame = 0
     eatman.lastAnimTime = 0
     eatman.lastEatTime = time.time()
@@ -2094,6 +2219,9 @@ def run_game(iLevel):
     # The buff
     buff = Buff()
 
+    # electric
+    electric = Electric()
+
     moveLeft  = False
     moveRight = False
     moveUp    = False
@@ -2146,7 +2274,19 @@ def run_game(iLevel):
                 elif event.key == K_b and debugit:
                     buff.active = True
                     buff.type = BUFF_BOMB
-                    buff.apply(eatman, ghosts, fires, explosion)
+                    buff.apply(eatman, ghosts, fires, explosion, electric)
+
+                elif event.key == K_l and debugit:
+                    buff.start(level, BUFF_ELECTRIC)
+                    buff.apply(eatman, ghosts, fires, explosion, electric)
+
+                elif event.key == K_s and debugit:
+                    buff.start(level, BUFF_SHIELD)
+                    buff.apply(eatman, ghosts, fires, explosion, electric)
+
+                elif event.key == K_d and debugit:
+                    buff.start(level, BUFF_DAO)
+                    buff.apply(eatman, ghosts, fires, explosion, electric)
 
                 elif event.key == K_f and debugit:
                     level.fruit_lastSpawnTime = 0
@@ -2191,24 +2331,28 @@ def run_game(iLevel):
         if (gameState != GAME_STATE_DYING \
                 and gameState != GAME_STATE_DEAD \
                 and gameState != GAME_STATE_WIN) \
-                and (moveUp or moveDown or moveLeft or moveRight) \
                 and eatman.motion == Eatman.MOTION_IDLE:
-            if moveUp: 
-                eatman.direction = UP 
-                if is_valid_position(level, eatman, voffset=-1):
-                    eatman.motion = Eatman.MOTION_ANIMATE
-            elif moveDown: 
-                eatman.direction = DOWN
-                if is_valid_position(level, eatman, voffset=1):
-                    eatman.motion = Eatman.MOTION_ANIMATE
-            elif moveLeft:
-                eatman.direction = LEFT
-                if is_valid_position(level, eatman, uoffset=-1):
-                    eatman.motion = Eatman.MOTION_ANIMATE
-            elif moveRight:
-                eatman.direction = RIGHT
-                if is_valid_position(level, eatman, uoffset=1):
-                    eatman.motion = Eatman.MOTION_ANIMATE
+
+            if eatman.mode == Eatman.MODE_DAO_PASSING:
+                eatman.motion = Eatman.MOTION_ANIMATE
+
+            elif moveUp or moveDown or moveLeft or moveRight:
+                if moveUp: 
+                    eatman.direction = UP 
+                    if is_valid_position(level, eatman, voffset=-1):
+                        eatman.motion = Eatman.MOTION_ANIMATE
+                elif moveDown: 
+                    eatman.direction = DOWN
+                    if is_valid_position(level, eatman, voffset=1):
+                        eatman.motion = Eatman.MOTION_ANIMATE
+                elif moveLeft:
+                    eatman.direction = LEFT
+                    if is_valid_position(level, eatman, uoffset=-1):
+                        eatman.motion = Eatman.MOTION_ANIMATE
+                elif moveRight:
+                    eatman.direction = RIGHT
+                    if is_valid_position(level, eatman, uoffset=1):
+                        eatman.motion = Eatman.MOTION_ANIMATE
 
         # The regular movements
         if gameState != GAME_STATE_DYING \
@@ -2216,7 +2360,7 @@ def run_game(iLevel):
                 and gameState != GAME_STATE_WIN:
 
             # The eatman
-            eatman.make_move()
+            eatman.make_move(buff)
 
             # Ghosts
             for ghost in ghosts:
@@ -2234,7 +2378,7 @@ def run_game(iLevel):
 
             # Check if anything is hit
             gameState = check_hit(level, eatman, ghosts, 
-                    fires, fruits, ftexts, explosion, buff)
+                    fires, fruits, ftexts, explosion, buff, electric)
 
 
         # Start the drawing
@@ -2252,10 +2396,7 @@ def run_game(iLevel):
             fruit.draw(DISPLAYSURF)
 
         # buff
-        if buff.is_expired():
-            buff.active = False
-        else:
-            buff.draw(DISPLAYSURF)
+        buff.draw(DISPLAYSURF, eatman)
 
         # ghosts
         for ghost in ghosts:
@@ -2263,6 +2404,9 @@ def run_game(iLevel):
 
         # explosion
         explosion.animate(DISPLAYSURF)
+
+        # electirc
+        electric.animate(DISPLAYSURF)
 
         # Draw game state infos
         draw_game_stats(level, eatman, ghosts)

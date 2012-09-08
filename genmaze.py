@@ -778,20 +778,20 @@ def genmaze(nrows, ncols, path_fill_ratio=0.33):
     # make the tunnel open
     tunnel_left = [
             '*****',
-            '####*',
+            'XXXX*',
             '*****',
             '$####',
             '*****',
-            '####*',
+            'XXXX*',
             '*****',
             ]
     tunnel_right = [
             '*****',
-            '*####',
+            '*XXXX',
             '*****',
             '####$',
             '*****',
-            '*####',
+            '*XXXX',
             '*****',
             ]
     for row in rowrange:
