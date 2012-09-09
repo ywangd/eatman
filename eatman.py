@@ -2465,6 +2465,7 @@ def main():
     resource.load_sounds()
     resource.load_sprites()
 
+    score = 0
     nlifes = config.get('Game','ilifes')
     score_reward = config.get('Game','iscorereward')
 
@@ -2498,6 +2499,7 @@ def main():
         if gameState == GAME_STATE_DEAD or gameState == GAME_STATE_RETURN_TITLE:
             score = 0
             nlifes = config.get('Game','ilifes')
+            score_reward = config.get('Game','iscorereward')
             while True:
                 show_title_screen()
                 iLevel = show_select_level_screen()
