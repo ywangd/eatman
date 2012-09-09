@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, time, random, copy
+import os, sys, time, random, base64
 import ConfigParser
 import pygame
 from pygame.locals import *
@@ -466,14 +466,25 @@ class Level(object):
         global hiscore, hsnames, hsvalues
         hsnames = []
         hsvalues = []
-        try:
-            hsfile = open(os.path.join(SRCDIR,'hiscore.txt'))
+        if os.path.exists('hiscore'):
+            hsfile = open(os.path.join(SRCDIR,'hiscore'))
             for line in hsfile.readlines():
-                name, value = line.strip().split(',')
+                line = base64.b64decode(line.strip())
+                name, value = line.split(',')
                 hsnames.append(name)
                 hsvalues.append(int(value))
-        except IOError, ValueError:
-            pass
+            hsfile.close()
+        else:
+            # following code is to deal with the historical problem of the plain hiscore file
+            if os.path.exists('hiscore.txt'):
+                hsfile = open(os.path.join(SRCDIR,'hiscore.txt'))
+                for line in hsfile.readlines():
+                    name, value = line.strip().split(',')
+                    hsnames.append(name)
+                    hsvalues.append(int(value))
+                hsfile.close()
+                os.remove('hiscore.txt')
+                save_hiscore()
         if len(hsnames) < 10:
             for ii in range(10-len(hsnames)):
                 hsnames.append('NONAME')
@@ -676,7 +687,7 @@ class Explosion(object):
         self.frame_sequence = range(14,-1,-1) + [0]
 
     def start(self, xypos):
-        self.xypos = copy.copy(xypos)
+        self.xypos = xypos[:]
         self.active = True
         self.lastAnimTime = time.time()
         resource.sounds['explosion'].play()
@@ -1867,7 +1878,7 @@ def draw_game_stats(level, eatman, ghosts):
     #energy = eatman.energy - level.energyLevel[level.idx_energyLevel-1] 
     #percent = energy*1.0/(level.energyLevel[level.idx_energyLevel] 
     #        - level.energyLevel[level.idx_energyLevel-1])
-    #rect = copy.copy(level.rect_energy)
+    #rect = level.rect_energy[:]
     #rect[2] = int(level.rect_energy[2]*percent)
     #pygame.draw.rect(DISPLAYSURF, YELLOW, rect)
     if debugit:
@@ -2030,7 +2041,7 @@ def show_select_level_screen(iLevel=None):
                     loopit = False
                 elif event.key == K_ESCAPE:
                     ijpos = None
-                    bid = -9999
+                    bid = None
                     loopit = False
                 elif event.key == K_BACKQUOTE:
                     pygame.display.iconify()
@@ -2054,7 +2065,10 @@ def show_select_level_screen(iLevel=None):
         pygame.display.update()
         CLOCK_FPS.tick(FPS_LOW)
 
-    return bid+1
+    if bid is not None:
+        bid += 1
+
+    return bid
 
 
 def show_pause_screen():
@@ -2410,14 +2424,16 @@ def show_win_screen(level, ghosts):
 
 
 def save_hiscore():
-    outs = open(os.path.join(SRCDIR,'hiscore.txt'),'w')
+    outs = open(os.path.join(SRCDIR,'hiscore'),'w')
     for ii in range(len(hsvalues)):
-        outs.write(hsnames[ii]+','+str(hsvalues[ii])+'\n')
+        line = hsnames[ii]+','+str(hsvalues[ii])
+        line = base64.b64encode(line)
+        outs.write(line+'\n')
     outs.close()
 
 def save_hilevel():
-    outs = open(os.path.join(SRCDIR,'hilevel.txt'),'w')
-    outs.write(str(hilevel)+'\n')
+    outs = open(os.path.join(SRCDIR,'hilevel'),'w')
+    outs.write(base64.b64encode(str(hilevel))+'\n')
     outs.close()
 
 
@@ -2443,6 +2459,8 @@ def pause_before_start():
     DISPLAYSURF.blit(tsurf, trect)
     pygame.display.update()
     time.sleep(0.6)
+    # clear all event for a clean start
+    pygame.event.clear()
 
 
 def main():
@@ -2471,8 +2489,8 @@ def main():
 
     # high level
     try:
-        hlfile = open(os.path.join(SRCDIR,'hilevel.txt'))
-        hilevel = int(hlfile.readline())
+        hlfile = open(os.path.join(SRCDIR,'hilevel'))
+        hilevel = int(base64.b64decode(hlfile.readline()))
     except IOError, ValueError:
         hilevel = 1
 
@@ -2489,10 +2507,8 @@ def main():
     while True:
         show_title_screen()
         iLevel = show_select_level_screen(iLevel)
-        if iLevel >= 1:
+        if iLevel is not None:
             break
-        else:
-            iLevel = None
 
     while True: # game loop
         run_game(iLevel)
@@ -2503,7 +2519,7 @@ def main():
             while True:
                 show_title_screen()
                 iLevel = show_select_level_screen()
-                if iLevel >= 1:
+                if iLevel is not None:
                     break
         elif gameState == GAME_STATE_WIN:
             iLevel += 1
@@ -2512,7 +2528,7 @@ def main():
                 while True:
                     show_title_screen()
                     iLevel = show_select_level_screen()
-                    if iLevel >= 1:
+                    if iLevel is not None:
                         break
             elif iLevel > hilevel:
                 hilevel = iLevel
